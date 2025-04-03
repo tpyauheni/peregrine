@@ -1,0 +1,112 @@
+::selection {
+    background-color: #b67de9;
+}
+
+body {
+    background-color: #0f1116;
+    color: #ffffff;
+    font-family: Arial, Helvetica, Tahoma, Geneva, Verdana, sans-serif;
+    margin: 0;
+    padding: 0;
+}
+
+.noselect {
+    user-select: none;
+    cursor: normal;
+}
+
+#center-container {
+    align-items: center;
+    justify-content: center;
+    display: flex;
+    width: 100vw;
+    height: 100vh
+}
+
+.panel {
+    background-color: #161b1f;
+    border-radius: 12px;
+    overflow: auto;
+}
+
+#inside-container {
+    /* align-items: center; */
+    /* justify-content: center; */
+    /* display: flex; */
+    width: 100%;
+    height: 100%;
+}
+
+input {
+    background-color: #121519;
+    border: 1px solid #3a3a3a;
+    color: #ffffff;
+    padding: 8px 12px 8px 12px;
+    border-radius: 4px;
+    font-weight: 300;
+    font-size: 1.0rem;
+    outline: none;
+    width: 100%;
+    box-sizing: border-box;
+    transition: 0.25s;
+    /* padding-left: 0; */
+    /* padding-right: 0; */
+}
+input:hover {
+    border-color: #4a4a4a;
+    background-color: #14171b;
+}
+input:focus {
+    border-color: #5b5b5b;
+}
+input:disabled {
+    border-color: #818181;
+    background-color: #373737;
+}
+
+button {
+    background-color: #965db9;
+    color: #fff;
+    font-weight: 300;
+    outline: none;
+    border: 1px solid #a68dd9;
+    border-radius: 4px;
+    transition: 0.25s;
+}
+button:hover {
+    background-color: #a66dc9;
+    border: 1px solid #b69dc9;
+    cursor: pointer;
+}
+button:focus {
+    background-color: #b67de9;
+    border: 1px solid #e6bdf9;
+}
+
+a {
+    color: #a68dd9;
+    outline: none;
+    border: 1px solid #00000000;
+    transition: 0.25s;
+    padding: 2px;
+    text-decoration: underline;
+    cursor: pointer;
+}
+a:hover {
+    color: #b69dc9;
+}
+a:focus {
+    color: #e6bdf9;
+    border-color: #e6bdf9;
+}
+
+.error-container {
+    background-color: #bd5252;
+    max-width: 100%;
+    padding: 1px;
+    border: 1px solid #ed8b8b;
+    border-radius: 4px;
+    color: #ffd8d8;
+    padding-left: 16px;
+    padding-right: 16px;
+}
