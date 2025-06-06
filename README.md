@@ -13,3 +13,6 @@ Peregrine is a secure fast cross-platform client and server written in Rust. It 
 
 ## Available cryptography implementations
 - [x] [bee2-rs](https://github.com/tpyauheni/bee2-rs)
+
+## Why Peregrine?
+[Peregrine falcon](https://en.wikipedia.org/wiki/Peregrine_falcon) is the name of the supposedly fastest animal on the planet. Peregrine is written in Rust which is supposedly the fastest programming language on the planet.
