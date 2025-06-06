@@ -5,9 +5,11 @@ edition = "2024"
 
 [dependencies]
 dioxus = { workspace = true, features = ["router"] }
+base64 = { workspace = true }
 ui = { workspace = true }
 client = { workspace = true }
 server = { workspace = true }
+shared = { workspace = true }
 
 [features]
 default = []

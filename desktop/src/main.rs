@@ -1,7 +1,8 @@
-use dioxus::prelude::*;
+use dioxus::{logger::tracing::error, prelude::*};
 
+use server::AccountCredentials;
 use ui::Navbar;
-use views::{Blog, Home, RegisterAccount, LoginAccount};
+use views::{Home, RegisterAccount, LoginAccount, Contacts};
 
 mod views;
 
@@ -11,8 +12,8 @@ pub enum Route {
     #[layout(DesktopNavbar)]
     #[route("/")]
     Home {},
-    #[route("/blog/:id")]
-    Blog { id: i32 },
+    #[route("/contacts/:credentials")]
+    Contacts { credentials: AccountCredentials },
     #[end_layout]
     #[nest("/account")]
         #[route("/")]
@@ -44,11 +45,18 @@ fn main() {
     //         .launch(App);
     // }
     // #[cfg(not(feature = "desktop"))]
+    #[cfg(feature = "server")]
+    {
+        server::init_server();
+    }
+
     dioxus::launch(App);
 }
 
 #[component]
 fn App() -> Element {
+    #[cfg(feature = "server")]
+    server::init_server();
     rsx! {
         document::Link { rel: "stylesheet", href: MAIN_CSS }
         Router::<Route> {}
@@ -60,16 +68,12 @@ fn App() -> Element {
 #[component]
 fn DesktopNavbar() -> Element {
     rsx! {
-        Navbar {
-            Link {
-                to: Route::Home {},
-                "Home"
-            }
-            Link {
-                to: Route::Blog { id: 1 },
-                "Blog"
-            }
-        }
+        // Navbar {
+        //     Link {
+        //         to: Route::Home {},
+        //         "Home"
+        //     }
+        // }
 
         Outlet::<Route> {}
     }

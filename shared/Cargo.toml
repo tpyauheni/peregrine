@@ -1,0 +1,16 @@
+[package]
+name = "shared"
+version = "0.1.0"
+edition = "2024"
+
+[dependencies]
+rand = "0.9"
+
+[dependencies.bee2-rs]
+git = "ssh://git@github.com/tpyauheni/bee2-rs.git"
+features = ["belt-ctr", "belt-hmac", "belt-pbkdf2", "bign", "bash-full"]
+optional = true
+
+[features]
+default = ["bee2-rs"]
+bee2-rs = ["dep:bee2-rs"]

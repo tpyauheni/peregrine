@@ -1,7 +1,7 @@
 mod home;
 mod register_account;
-mod blog;
+mod contacts;
 
 pub use home::Home;
-pub use blog::Blog;
 pub use register_account::{RegisterAccount, LoginAccount};
+pub use contacts::Contacts; 

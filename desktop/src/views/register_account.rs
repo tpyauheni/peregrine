@@ -1,14 +1,7 @@
-use std::cell::LazyCell;
-use std::cell::RefCell;
-use std::rc::Rc;
-use std::sync::Arc;
-use std::sync::LazyLock;
-use std::sync::Mutex;
-
 use dioxus::{logger::tracing::info, prelude::*};
+use shared::crypto::{AsymmetricCipherPrivate, AsymmetricCipherPublic};
 
 use crate::Route;
-use crate::server;
 
 const DEFAULT_SERVER: &str = "5.100.193.94";
 
@@ -16,7 +9,7 @@ fn check_email(email: &str) -> Option<String> {
     // TODO: Use some crate for email-checking.
     // It is way harder than I expected.
 
-    if email.len() == 0 {
+    if email.is_empty() {
         Some("Email is a required field".to_owned())
     } else if email.len() < 3 {
         Some("Email is too short".to_owned())
@@ -149,7 +142,6 @@ pub fn RegisterAccount() -> Element {
         } else {
             DEFAULT_SERVER.to_owned()
         };
-        info!("Submitting form: email='{email}', username='{username}', server='{server}', password.len()={}", password.len());
 
         if let Some(error) = check_email(email) {
             info!("Invalid user input: email verification error: '{}'", error);
@@ -169,11 +161,14 @@ pub fn RegisterAccount() -> Element {
             return;
         }
 
+        let cryptoset = shared::crypto::default_cryptoset(password.as_bytes(), None);
+        let public_key = cryptoset.asymmetric_cipher.into_public_key_bytes();
+        info!("Submitting form: email='{email}', username='{username}', server='{server}', public_key={public_key:?}");
         error_sig.set(None);
         // The following (commented out) line does not work as expected:
         // server_fn::client::set_server_url(server.leak());
-        server::create_account(email.to_owned(), username.to_owned(), password.as_bytes().to_vec()).await.unwrap();
-        info!("Form submitted");
+        let session_token = server::create_account(email.to_owned(), username.to_owned(), public_key).await.unwrap();
+        info!("Form submitted, session token: {session_token:?}");
     }
 
     rsx! {
