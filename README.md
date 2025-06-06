@@ -1,19 +1,12 @@
-# Development
+<div align="center">
+<img alt="Peregrine" src="https://github.com/tpyauheni/peregrine/blob/main/desktop/assets/icon_transparent.png" width="128">
+<h1>Peregrine</h1>
+<b>Blazingly fast and secure message with large amount of intergrations.</b>
+</div>
+<br>
 
-Depending on your selected options, your new workspace project contains a workspace member for each platform.
-If you chose to develop with the router feature, each platform crate will have a `views` folder for your platform-specific views.
-You are provided with a `ui` crate for shared UI and if you chose to use fullstack, you will have a `server` crate for your shared server functions.
+Peregrine is a secure fast cross-platform client and server written in Rust. It supports desktop (Linux, Windows, Mac OS) and mobile platforms (Android, iOS). Is is made in such a way that switching implementations of cryptographic algorithms is a pretty easy process. Multiple clients can communicate using different encryption methods as long as both of them have all two of the decryption methods.
 
-### Serving Your App
-
-Navigate to the platform crate of your choice:
-```bash
-cd web
-```
-
-and serve:
-
-```bash
-dx serve
-```
-
+## Integrations
+- [ ] Matrix
+- [ ] Telegram
