@@ -10,3 +10,6 @@ Peregrine is a secure fast cross-platform client and server written in Rust. It 
 ## Integrations
 - [ ] Matrix
 - [ ] Telegram
+
+## Available cryptography implementations
+- [x] [bee2-rs](https://github.com/tpyauheni/bee2-rs)
