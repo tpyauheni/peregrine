@@ -1,10 +1,11 @@
-use crate::{Account, DmMessage};
+use crate::{Account, DmMessage, DmInvite};
 
 use std::sync::{LazyLock, Arc, Mutex};
 
-use mysql::{params, Pool, PooledConn};
+use mysql::{params, Pool, Row};
 use mysql::prelude::*;
 use rand::{rngs::StdRng, SeedableRng};
+use shared::limits::LIMITS;
 
 #[derive(Debug, Clone)]
 pub struct Database {
@@ -22,10 +23,6 @@ impl Database {
 
     pub fn new(url: &str) -> Self {
         Self::try_new(url).unwrap()
-    }
-
-    pub fn get_context(&self) -> DbResult<PooledConn> {
-        Ok(self.pool.get_conn()?)
     }
 
     pub fn init(&self) -> DbResult<()> {
@@ -74,24 +71,32 @@ impl Database {
                 `permissions` VARCHAR(255) NOT NULL
             );
         ")?;
-        conn.query_drop(r"
+        conn.query_drop(format!(r"
             CREATE TABLE IF NOT EXISTS `messages` (
                 `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
                 `sender_id` BIGINT NOT NULL,
                 `group_id` BIGINT NOT NULL,
-                `encryption_method` VARCHAR(16) NOT NULL,
+                `encryption_method` VARCHAR({}) NOT NULL,
                 `reply_message_id` BIGINT,
                 `edited_message_id` BIGINT,
                 `content` BLOB NOT NULL,
                 `send_time` DATETIME NOT NULL,
                 `is_dm` BIT NOT NULL
             );
-        ")?;
+        ", LIMITS.max_encryption_method_length))?;
         conn.query_drop(r"
             CREATE TABLE IF NOT EXISTS `read_messages` (
                 `message_id` BIGINT NOT NULL,
                 `user_id` BIGINT NOT NULL,
                 `timestamp` DATETIME DEFAULT CURRENT_TIMESTAMP
+            );
+        ")?;
+        conn.query_drop(r"
+            CREATE TABLE IF NOT EXISTS `dm_invites` (
+                `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                `initiator_id` BIGINT NOT NULL,
+                `other_id` BIGINT NOT NULL,
+                `encrypted` BIT NOT NULL
             );
         ")?;
         Ok(())
@@ -173,8 +178,8 @@ impl Database {
         session_token: [u8; 32],
     ) -> DbResult<bool> {
         let mut conn = self.pool.get_conn()?;
-        let value: Option<u64> = conn.exec_first(
-            r"SELECT `account_id` FROM `sessions`
+        let value: Option<u8> = conn.exec_first(
+            r"SELECT 1 FROM `sessions`
                 WHERE `account_id` = ?
                 AND `session_token` = ?
                 AND `begin_time` <= NOW()
@@ -205,6 +210,21 @@ impl Database {
         Ok(group_id)
     }
 
+    pub fn is_in_dm_group(&self, sender_id: u64, group_id: u64) -> DbResult<bool> {
+        let mut conn = self.pool.get_conn()?;
+        let value: Option<u8> = conn.exec_first(
+            r"SELECT 1 FROM `dm_groups`
+                WHERE (`initiator_id` = :sender_id
+                    OR `other_id` = :sender_id)
+                    AND `id` = :group_id;",
+            params! {
+                group_id,
+                sender_id,
+            },
+        )?;
+        Ok(value.is_some())
+    }
+
     pub fn send_dm_message(
         &self,
         sender_id: u64,
@@ -212,16 +232,8 @@ impl Database {
         encryption_method: &str,
         content: &[u8],
         send_time: Option<chrono::NaiveDateTime>,
-    ) -> DbResult<()> {
+    ) -> DbResult<u64> {
         let mut conn = self.pool.get_conn()?;
-        // `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
-        // `group_id` BIGINT NOT NULL,
-        // `encryption_method` VARCHAR(16) NOT NULL,
-        // `reply_message_id` BIGINT,
-        // `edited_message_id` BIGINT,
-        // `content` BLOB NOT NULL,
-        // `send_time` DATETIME NOT NULL,
-        // `is_dm` BIT NOT NULL
         conn.exec_drop(r"INSERT INTO `messages` (
                 `group_id`,
                 `sender_id`,
@@ -240,11 +252,12 @@ impl Database {
                 send_time,
             ),
         )?;
-        Ok(())
+        Ok(conn.query_first("SELECT LAST_INSERT_ID();")?.unwrap())
     }
 
     pub fn get_dm_messages(
         &self,
+        first_message_id: u64,
         group_id: u64,
         account_id: u64,
     ) -> DbResult<Vec<DmMessage>> {
@@ -259,11 +272,12 @@ impl Database {
                 `content`,
                 `send_time`
                 FROM `messages`
-                WHERE `group_id` = ?
-                AND `is_dm` = 1
+                WHERE `id` > ?
+                    AND `group_id` = ?
+                    AND `is_dm` = 1
                 ORDER BY `send_time` DESC
                 LIMIT 30;",
-            (group_id,),
+            (first_message_id, group_id),
             |(
                 id,
                 sender_id,
@@ -288,6 +302,121 @@ impl Database {
         Ok(value)
     }
 
+    pub fn add_dm_invite(&self, initiator_id: u64, other_id: u64, encrypted: bool) -> DbResult<u64> {
+        let mut conn = self.pool.get_conn()?;
+        conn.exec_drop(r"INSERT INTO `dm_invites` (
+            `initiator_id`,
+            `other_id`,
+            `encrypted`
+        ) VALUES (?, ?, ?);", (
+            initiator_id,
+            other_id,
+            encrypted,
+        ))?;
+        Ok(conn.query_first("SELECT LAST_INSERT_ID();")?.unwrap())
+    }
+
+    pub fn get_dm_invite(&self, id: u64) -> DbResult<DmInvite> {
+        let mut conn = self.pool.get_conn()?;
+        let mut invite: Row = conn.exec_first(r"SELECT * FROM `invites`
+            WHERE `id` = ?;", (id,))?.unwrap();
+        Ok(DmInvite {
+            id: invite.take_opt(0).unwrap()?,
+            initiator_id: invite.take_opt(1).unwrap()?,
+            other_id: invite.take_opt(2).unwrap()?,
+            encrypted: invite.take_opt(3).unwrap()?,
+        })
+    }
+
+    pub fn remove_dm_invite(&self, id: u64) -> DbResult<()> {
+        let mut conn = self.pool.get_conn()?;
+        conn.exec_drop(r"DELETE FROM `dm_invites`
+            WHERE `id` = ?;", (id,))?;
+        Ok(())
+    }
+
+    pub fn get_sent_dm_invites(&self, id: u64) -> DbResult<Vec<DmInvite>> {
+        let mut conn = self.pool.get_conn()?;
+        let value = conn.exec_map(
+            r"SELECT
+                *
+                FROM `dm_invites`
+                WHERE `initiator_id` = ? 
+                ORDER BY `id` DESC
+                LIMIT 30;",
+            (id,),
+            |(
+                id,
+                initiator_id,
+                other_id,
+                encrypted_bytes,
+            )| {
+                let _: Box<[u8]> = encrypted_bytes;
+                DmInvite {
+                    id,
+                    initiator_id,
+                    other_id,
+                    encrypted: encrypted_bytes[0] != 0,
+                }
+            },
+        )?;
+        Ok(value)
+    }
+
+    pub fn get_received_dm_invites(&self, id: u64) -> DbResult<Vec<DmInvite>> {
+        let mut conn = self.pool.get_conn()?;
+        let value = conn.exec_map(
+            r"SELECT
+                *
+                FROM `dm_invites`
+                WHERE `other_id` = ? 
+                ORDER BY `id` DESC
+                LIMIT 30;",
+            (id,),
+            |(
+                id,
+                initiator_id,
+                other_id,
+                encrypted_bytes,
+            )| {
+                let _: Box<[u8]> = encrypted_bytes;
+                DmInvite {
+                    id,
+                    initiator_id,
+                    other_id,
+                    encrypted: encrypted_bytes[0] != 0,
+                }
+            },
+        )?;
+        Ok(value)
+    }
+
+    pub fn is_valid_user_id(&self, id: u64) -> DbResult<bool> {
+        let mut conn = self.pool.get_conn()?;
+        let value: Option<u8> = conn.exec_first(r"SELECT 1 FROM `accounts`
+            WHERE id = ?;",
+            (id,)
+        )?;
+        Ok(value.is_some())
+    }
+
+    pub fn is_valid_dm_group_id(&self, id: u64) -> DbResult<bool> {
+        let mut conn = self.pool.get_conn()?;
+        let value: Option<u8> = conn.exec_first(r"SELECT 1 FROM `dm_groups`
+            WHERE id = ?;",
+            (id,)
+        )?;
+        Ok(value.is_some())
+    }
+
+    pub fn remove_dm_group(&self, group_id: u64) -> DbResult<()> {
+        let mut conn = self.pool.get_conn()?;
+        Ok(conn.exec_drop(r"DELETE FROM `dm_groups`
+            WHERE id = ?",
+            (group_id,),
+        )?)
+    }
+
     /// # Safety:
     /// Always safe. Marked as unsafe only to prevent complete data resets (e.g. when the wrong
     /// option is selected in a code autocomplion menu).
@@ -300,6 +429,7 @@ impl Database {
         conn.query_drop("DROP TABLE IF EXISTS `group_members`;")?;
         conn.query_drop("DROP TABLE IF EXISTS `messages`;")?;
         conn.query_drop("DROP TABLE IF EXISTS `read_messages`;")?;
+        conn.query_drop("DROP TABLE IF EXISTS `dm_invites`;")?;
         self.init()?;
         Ok(())
     }
@@ -331,7 +461,7 @@ pub mod rng {
 mod tests {
     use std::sync::{LazyLock, Once};
 
-    use crate::secret::db::Account;
+    use crate::{secret::db::Account, DmInvite};
 
     use super::Database;
 
@@ -350,36 +480,64 @@ mod tests {
     fn db_test_users() {
         init();
 
+        for id in 0..=6 {
+            assert!(!DB.is_valid_user_id(id).unwrap());
+        }
         DB.create_account(
             &[1],
             &[],
             Some("some_email@example.com"),
             Some("The first User"),
         ).unwrap();
+        assert!(!DB.is_valid_user_id(0).unwrap());
+        assert!(DB.is_valid_user_id(1).unwrap());
+        assert!(!DB.is_valid_user_id(2).unwrap());
         DB.create_account(
             &[2],
             &[],
             None,
             Some("The second user"),
         ).unwrap();
+        assert!(!DB.is_valid_user_id(0).unwrap());
+        assert!(DB.is_valid_user_id(1).unwrap());
+        assert!(DB.is_valid_user_id(2).unwrap());
+        assert!(!DB.is_valid_user_id(3).unwrap());
         DB.create_account(
             &[3],
             &[],
             Some("third_user@example.com"),
             None,
         ).unwrap();
+        assert!(!DB.is_valid_user_id(0).unwrap());
+        assert!(DB.is_valid_user_id(1).unwrap());
+        assert!(DB.is_valid_user_id(2).unwrap());
+        assert!(DB.is_valid_user_id(3).unwrap());
+        assert!(!DB.is_valid_user_id(4).unwrap());
         DB.create_account(
             &[4],
             &[],
             None,
             None,
         ).unwrap();
+        assert!(!DB.is_valid_user_id(0).unwrap());
+        assert!(DB.is_valid_user_id(1).unwrap());
+        assert!(DB.is_valid_user_id(2).unwrap());
+        assert!(DB.is_valid_user_id(3).unwrap());
+        assert!(DB.is_valid_user_id(4).unwrap());
+        assert!(!DB.is_valid_user_id(5).unwrap());
         DB.create_account(
             &[5],
             &[],
             Some("different_account@example.com"),
             Some("Account 5"),
         ).unwrap();
+        assert!(!DB.is_valid_user_id(0).unwrap());
+        assert!(DB.is_valid_user_id(1).unwrap());
+        assert!(DB.is_valid_user_id(2).unwrap());
+        assert!(DB.is_valid_user_id(3).unwrap());
+        assert!(DB.is_valid_user_id(4).unwrap());
+        assert!(DB.is_valid_user_id(5).unwrap());
+        assert!(!DB.is_valid_user_id(6).unwrap());
         assert_eq!(
             DB.find_user("user").unwrap(),
             vec![
@@ -414,11 +572,63 @@ mod tests {
         assert!(!DB.is_session_valid(1, token2).unwrap());
         assert!(DB.is_session_valid(2, token2).unwrap());
         assert!(!DB.is_session_valid(3, token2).unwrap());
+        let invite1 = DmInvite {
+            id: 1,
+            initiator_id: 1,
+            other_id: 2,
+            encrypted: false,
+        };
+        let invite2 = DmInvite {
+            id: 2,
+            initiator_id: 3,
+            other_id: 2,
+            encrypted: false,
+        };
+        let invite3 = DmInvite {
+            id: 3,
+            initiator_id: 3,
+            other_id: 1,
+            encrypted: false,
+        };
+        DB.add_dm_invite(invite1.initiator_id, invite1.other_id, invite1.encrypted).unwrap();
+        DB.add_dm_invite(invite2.initiator_id, invite2.other_id, invite2.encrypted).unwrap();
+        DB.add_dm_invite(invite3.initiator_id, invite3.other_id, invite3.encrypted).unwrap();
+        assert_eq!(DB.get_sent_dm_invites(1).unwrap(), vec![invite1]);
+        assert_eq!(DB.get_received_dm_invites(1).unwrap(), vec![invite3]);
+        assert_eq!(DB.get_sent_dm_invites(2).unwrap(), vec![]);
+        assert_eq!(DB.get_received_dm_invites(2).unwrap(), vec![invite2, invite1]);
+        assert_eq!(DB.get_sent_dm_invites(3).unwrap(), vec![invite3, invite2]);
+        assert_eq!(DB.get_received_dm_invites(3).unwrap(), vec![]);
+        DB.remove_dm_invite(3).unwrap();
+        assert_eq!(DB.get_sent_dm_invites(1).unwrap(), vec![invite1]);
+        assert_eq!(DB.get_received_dm_invites(1).unwrap(), vec![]);
+        assert_eq!(DB.get_sent_dm_invites(2).unwrap(), vec![]);
+        assert_eq!(DB.get_received_dm_invites(2).unwrap(), vec![invite2, invite1]);
+        assert_eq!(DB.get_sent_dm_invites(3).unwrap(), vec![invite2]);
+        assert_eq!(DB.get_received_dm_invites(3).unwrap(), vec![]);
+        assert!(!DB.is_valid_dm_group_id(0).unwrap());
+        assert!(!DB.is_valid_dm_group_id(1).unwrap());
+        assert!(!DB.is_valid_dm_group_id(2).unwrap());
+        assert!(!DB.is_in_dm_group(1, 1).unwrap());
+        assert!(!DB.is_in_dm_group(2, 1).unwrap());
+        assert!(!DB.is_in_dm_group(3, 1).unwrap());
+        assert!(!DB.is_in_dm_group(1, 2).unwrap());
+        assert!(!DB.is_in_dm_group(2, 2).unwrap());
+        assert!(!DB.is_in_dm_group(3, 2).unwrap());
         let dm_group1 = DB.create_dm_group(1, 2, true).unwrap();
+        assert!(DB.is_in_dm_group(1, 1).unwrap());
+        assert!(DB.is_in_dm_group(2, 1).unwrap());
+        assert!(!DB.is_in_dm_group(3, 1).unwrap());
+        assert!(!DB.is_in_dm_group(1, 2).unwrap());
+        assert!(!DB.is_in_dm_group(2, 2).unwrap());
+        assert!(!DB.is_in_dm_group(3, 2).unwrap());
+        assert!(!DB.is_valid_dm_group_id(0).unwrap());
+        assert!(DB.is_valid_dm_group_id(1).unwrap());
+        assert!(!DB.is_valid_dm_group_id(2).unwrap());
         assert_eq!(dm_group1, 1);
         DB.send_dm_message(1, dm_group1, "!plaintext", "Hello, World!".as_bytes(), None).unwrap();
         DB.send_dm_message(2, dm_group1, "privatecipher123", &[0x69, 0x68], None).unwrap();
-        let dm_messages1 = DB.get_dm_messages(dm_group1, 1).unwrap();
+        let dm_messages1 = DB.get_dm_messages(0, dm_group1, 1).unwrap();
         assert_eq!(dm_messages1[0].id, 1);
         assert_eq!(dm_messages1[0].encryption_method, "!plaintext");
         assert_eq!(dm_messages1[0].content, "Hello, World!".as_bytes().into());
@@ -431,9 +641,34 @@ mod tests {
         assert_eq!(dm_messages1[1].reply_to, None);
         assert_eq!(dm_messages1[1].edit_for, None);
         assert!(!dm_messages1[1].sent_by_me);
-        let mut dm_messages2 = DB.get_dm_messages(dm_group1, 2).unwrap();
+        assert_eq!(dm_messages1.len(), 2);
+        let mut dm_messages2 = DB.get_dm_messages(0, dm_group1, 2).unwrap();
         dm_messages2[0].sent_by_me = !dm_messages2[0].sent_by_me;
         dm_messages2[1].sent_by_me = !dm_messages2[1].sent_by_me;
         assert_eq!(dm_messages1, dm_messages2);
+        dm_messages2[0].sent_by_me = !dm_messages2[0].sent_by_me;
+        dm_messages2[1].sent_by_me = !dm_messages2[1].sent_by_me;
+        let dm_messages3 = DB.get_dm_messages(1, dm_group1, 2).unwrap();
+        assert_eq!(dm_messages2[1], dm_messages3[0]);
+        assert_eq!(dm_messages3.len(), 1);
+        let dm_group2 = DB.create_dm_group(3, 2, true).unwrap();
+        assert!(DB.is_in_dm_group(1, 1).unwrap());
+        assert!(DB.is_in_dm_group(2, 1).unwrap());
+        assert!(!DB.is_in_dm_group(3, 1).unwrap());
+        assert!(!DB.is_in_dm_group(1, 2).unwrap());
+        assert!(DB.is_in_dm_group(2, 2).unwrap());
+        assert!(DB.is_in_dm_group(3, 2).unwrap());
+        DB.remove_dm_group(dm_group1).unwrap();
+        assert!(!DB.is_in_dm_group(1, 1).unwrap());
+        assert!(!DB.is_in_dm_group(2, 1).unwrap());
+        assert!(!DB.is_in_dm_group(3, 1).unwrap());
+        assert!(!DB.is_in_dm_group(1, 2).unwrap());
+        assert!(DB.is_in_dm_group(2, 2).unwrap());
+        assert!(DB.is_in_dm_group(3, 2).unwrap());
+        assert!(!DB.is_valid_dm_group_id(0).unwrap());
+        assert!(!DB.is_valid_dm_group_id(1).unwrap());
+        assert!(DB.is_valid_dm_group_id(2).unwrap());
+        DB.remove_dm_group(dm_group2).unwrap();
+        assert!(!DB.is_valid_dm_group_id(2).unwrap());
     }
 }
