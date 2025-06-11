@@ -1,5 +1,5 @@
 use dioxus::{logger::tracing::info, prelude::*};
-use shared::crypto::{AsymmetricCipherPrivate, AsymmetricCipherPublic};
+use shared::crypto::AsymmetricCipherPublic;
 
 use crate::Route;
 
@@ -60,7 +60,9 @@ fn check_email(email: &str) -> Option<String> {
             for chr in iter {
                 if chr == <char as TryInto<u8>>::try_into('.').unwrap() {
                     if prev_dot {
-                        return Some("Quoted characters in emails are not yet supported".to_owned());
+                        return Some(
+                            "Quoted characters in emails are not yet supported".to_owned(),
+                        );
                     }
                     prev_dot = true;
                 } else {
@@ -163,11 +165,14 @@ pub fn RegisterAccount() -> Element {
 
         let cryptoset = shared::crypto::default_cryptoset(password.as_bytes(), None);
         let public_key = cryptoset.asymmetric_cipher.into_public_key_bytes();
-        info!("Submitting form: email='{email}', username='{username}', server='{server}', public_key={public_key:?}");
+        info!(
+            "Submitting form: email='{email}', username='{username}', server='{server}', public_key={public_key:?}"
+        );
         error_sig.set(None);
-        // The following (commented out) line does not work as expected:
-        // server_fn::client::set_server_url(server.leak());
-        let session_token = server::create_account(email.to_owned(), username.to_owned(), public_key).await.unwrap();
+        let session_token =
+            server::create_account(email.to_owned(), username.to_owned(), public_key)
+                .await
+                .unwrap();
         info!("Form submitted, session token: {session_token:?}");
     }
 
@@ -180,16 +185,11 @@ pub fn RegisterAccount() -> Element {
                 class: "panel noselect",
                 width: format!("{PANEL_WIDTH}px"),
                 max_height: "94vh",
-                // height: format!("{PANEL_HEIGHT}px"),
 
                 div {
                     id: "inside-container",
-                    // text_align: "center",
-                    // align: "center",
                     margin_left: format!("{PANEL_MARGIN_WIDTH}px"),
                     width: format!("{INNER_PANEL_WIDTH}px"),
-                    // height: format!("{INNER_PANEL_HEIGHT}px"),
-                    // margin_right: "96px",
                     margin_top: format!("{PANEL_MARGIN_HEIGHT}px"),
 
                     div {
@@ -218,7 +218,6 @@ pub fn RegisterAccount() -> Element {
                         }
                     }
 
-                    // h2 { text_align: "center", "Create a new Peregrine account" }
                     br {}
 
                     form {
@@ -327,7 +326,6 @@ pub fn LoginAccount() -> Element {
                 div {
                     id: "inside-container",
                     text_align: "center",
-                    // align: "center",
                     margin: "24px",
 
                     h1 { text_align: "center", margin_bottom: "12px", "Log into an existing account" }

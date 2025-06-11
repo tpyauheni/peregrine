@@ -1,10 +1,10 @@
-use crate::{Account, DmMessage, DmInvite};
+use crate::{Account, DmInvite, DmMessage};
 
-use std::sync::{LazyLock, Arc, Mutex};
+use std::sync::{Arc, LazyLock, Mutex};
 
-use mysql::{params, Pool, Row};
 use mysql::prelude::*;
-use rand::{rngs::StdRng, SeedableRng};
+use mysql::{Pool, Row, params};
+use rand::{SeedableRng, rngs::StdRng};
 use shared::limits::LIMITS;
 
 #[derive(Debug, Clone)]
@@ -27,7 +27,8 @@ impl Database {
 
     pub fn init(&self) -> DbResult<()> {
         let mut conn = self.pool.get_conn()?;
-        conn.query_drop(r"
+        conn.query_drop(
+            r"
             CREATE TABLE IF NOT EXISTS `accounts` (
                 `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
                 `public_key` BLOB NOT NULL,
@@ -35,16 +36,20 @@ impl Database {
                 `email` VARCHAR(255),
                 `username` VARCHAR(255)
             );
-        ")?;
-        conn.query_drop(r"
+        ",
+        )?;
+        conn.query_drop(
+            r"
             CREATE TABLE IF NOT EXISTS `sessions` (
                 `account_id` BIGINT NOT NULL,
                 `session_token` BLOB NOT NULL,
                 `begin_time` DATETIME NOT NULL,
                 `end_time` DATETIME NOT NULL
             );
-        ")?;
-        conn.query_drop(r"
+        ",
+        )?;
+        conn.query_drop(
+            r"
             CREATE TABLE IF NOT EXISTS `groups` (
                 `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
                 `name` VARCHAR(255),
@@ -53,25 +58,31 @@ impl Database {
                 `public` BIT NOT NULL,
                 `channel` BIT NOT NULL
             );
-        ")?;
-        conn.query_drop(r"
+        ",
+        )?;
+        conn.query_drop(
+            r"
             CREATE TABLE IF NOT EXISTS `dm_groups` (
                 `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
                 `encrypted` BIT NOT NULL,
                 `initiator_id` BIGINT NOT NULL,
                 `other_id` BIGINT NOT NULL
             );
-        ")?;
+        ",
+        )?;
         // Table `group_members` is not intended for channel members (which are not stored on the
         // server) and it's not intended for DM groups.
-        conn.query_drop(r"
+        conn.query_drop(
+            r"
             CREATE TABLE IF NOT EXISTS `group_members` (
                 `group_id` BIGINT NOT NULL,
                 `user_id` BIGINT NOT NULL,
                 `permissions` VARCHAR(255) NOT NULL
             );
-        ")?;
-        conn.query_drop(format!(r"
+        ",
+        )?;
+        conn.query_drop(format!(
+            r"
             CREATE TABLE IF NOT EXISTS `messages` (
                 `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
                 `sender_id` BIGINT NOT NULL,
@@ -83,22 +94,28 @@ impl Database {
                 `send_time` DATETIME NOT NULL,
                 `is_dm` BIT NOT NULL
             );
-        ", LIMITS.max_encryption_method_length))?;
-        conn.query_drop(r"
+        ",
+            LIMITS.max_encryption_method_length
+        ))?;
+        conn.query_drop(
+            r"
             CREATE TABLE IF NOT EXISTS `read_messages` (
                 `message_id` BIGINT NOT NULL,
                 `user_id` BIGINT NOT NULL,
                 `timestamp` DATETIME DEFAULT CURRENT_TIMESTAMP
             );
-        ")?;
-        conn.query_drop(r"
+        ",
+        )?;
+        conn.query_drop(
+            r"
             CREATE TABLE IF NOT EXISTS `dm_invites` (
                 `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
                 `initiator_id` BIGINT NOT NULL,
                 `other_id` BIGINT NOT NULL,
                 `encrypted` BIT NOT NULL
             );
-        ")?;
+        ",
+        )?;
         Ok(())
     }
 
@@ -117,14 +134,9 @@ impl Database {
                 `email`,
                 `username`
             ) VALUES (?, ?, ?, ?);",
-            (
-                public_key,
-                encrypted_private_info,
-                email,
-                username,
-            ),
+            (public_key, encrypted_private_info, email, username),
         )?;
-        // `LAST_INSERT_ID()` returns the last id only for the current Pool connection. 
+        // `LAST_INSERT_ID()` returns the last id only for the current Pool connection.
         Ok(conn.query_first("SELECT LAST_INSERT_ID();")?.unwrap())
     }
 
@@ -165,18 +177,18 @@ impl Database {
             params! {
                 query,
             },
-            |(id, public_key, encrypted_private_info, email, username)| {
-                Account { id, public_key, encrypted_private_info, email, username }
-            }
+            |(id, public_key, encrypted_private_info, email, username)| Account {
+                id,
+                public_key,
+                encrypted_private_info,
+                email,
+                username,
+            },
         )?;
         Ok(accounts)
     }
 
-    pub fn is_session_valid(
-        &self,
-        account_id: u64,
-        session_token: [u8; 32],
-    ) -> DbResult<bool> {
+    pub fn is_session_valid(&self, account_id: u64, session_token: [u8; 32]) -> DbResult<bool> {
         let mut conn = self.pool.get_conn()?;
         let value: Option<u8> = conn.exec_first(
             r"SELECT 1 FROM `sessions`
@@ -197,15 +209,12 @@ impl Database {
         encrypted: bool,
     ) -> DbResult<u64> {
         let mut conn = self.pool.get_conn()?;
-        conn.exec_drop(r"INSERT INTO `dm_groups` (`initiator_id`, `other_id`, `encrypted`)
+        conn.exec_drop(
+            r"INSERT INTO `dm_groups` (`initiator_id`, `other_id`, `encrypted`)
                 VALUES (?, ?, ?);",
-            (
-                initiator_id,
-                other_id,
-                encrypted,
-            ),
+            (initiator_id, other_id, encrypted),
         )?;
-        // `LAST_INSERT_ID()` returns the last id only for the current Pool connection. 
+        // `LAST_INSERT_ID()` returns the last id only for the current Pool connection.
         let group_id: u64 = conn.query_first("SELECT LAST_INSERT_ID();")?.unwrap();
         Ok(group_id)
     }
@@ -234,7 +243,8 @@ impl Database {
         send_time: Option<chrono::NaiveDateTime>,
     ) -> DbResult<u64> {
         let mut conn = self.pool.get_conn()?;
-        conn.exec_drop(r"INSERT INTO `messages` (
+        conn.exec_drop(
+            r"INSERT INTO `messages` (
                 `group_id`,
                 `sender_id`,
                 `encryption_method`,
@@ -244,13 +254,7 @@ impl Database {
                 `send_time`,
                 `is_dm`
             ) VALUES (?, ?, ?, NULL, NULL, ?, IFNULL(?, CURRENT_TIMESTAMP()), 1)",
-            (
-                group_id,
-                sender_id,
-                encryption_method,
-                content,
-                send_time,
-            ),
+            (group_id, sender_id, encryption_method, content, send_time),
         )?;
         Ok(conn.query_first("SELECT LAST_INSERT_ID();")?.unwrap())
     }
@@ -302,24 +306,33 @@ impl Database {
         Ok(value)
     }
 
-    pub fn add_dm_invite(&self, initiator_id: u64, other_id: u64, encrypted: bool) -> DbResult<u64> {
+    pub fn add_dm_invite(
+        &self,
+        initiator_id: u64,
+        other_id: u64,
+        encrypted: bool,
+    ) -> DbResult<u64> {
         let mut conn = self.pool.get_conn()?;
-        conn.exec_drop(r"INSERT INTO `dm_invites` (
+        conn.exec_drop(
+            r"INSERT INTO `dm_invites` (
             `initiator_id`,
             `other_id`,
             `encrypted`
-        ) VALUES (?, ?, ?);", (
-            initiator_id,
-            other_id,
-            encrypted,
-        ))?;
+        ) VALUES (?, ?, ?);",
+            (initiator_id, other_id, encrypted),
+        )?;
         Ok(conn.query_first("SELECT LAST_INSERT_ID();")?.unwrap())
     }
 
     pub fn get_dm_invite(&self, id: u64) -> DbResult<DmInvite> {
         let mut conn = self.pool.get_conn()?;
-        let mut invite: Row = conn.exec_first(r"SELECT * FROM `invites`
-            WHERE `id` = ?;", (id,))?.unwrap();
+        let mut invite: Row = conn
+            .exec_first(
+                r"SELECT * FROM `invites`
+            WHERE `id` = ?;",
+                (id,),
+            )?
+            .unwrap();
         Ok(DmInvite {
             id: invite.take_opt(0).unwrap()?,
             initiator_id: invite.take_opt(1).unwrap()?,
@@ -330,8 +343,11 @@ impl Database {
 
     pub fn remove_dm_invite(&self, id: u64) -> DbResult<()> {
         let mut conn = self.pool.get_conn()?;
-        conn.exec_drop(r"DELETE FROM `dm_invites`
-            WHERE `id` = ?;", (id,))?;
+        conn.exec_drop(
+            r"DELETE FROM `dm_invites`
+            WHERE `id` = ?;",
+            (id,),
+        )?;
         Ok(())
     }
 
@@ -345,12 +361,7 @@ impl Database {
                 ORDER BY `id` DESC
                 LIMIT 30;",
             (id,),
-            |(
-                id,
-                initiator_id,
-                other_id,
-                encrypted_bytes,
-            )| {
+            |(id, initiator_id, other_id, encrypted_bytes)| {
                 let _: Box<[u8]> = encrypted_bytes;
                 DmInvite {
                     id,
@@ -373,12 +384,7 @@ impl Database {
                 ORDER BY `id` DESC
                 LIMIT 30;",
             (id,),
-            |(
-                id,
-                initiator_id,
-                other_id,
-                encrypted_bytes,
-            )| {
+            |(id, initiator_id, other_id, encrypted_bytes)| {
                 let _: Box<[u8]> = encrypted_bytes;
                 DmInvite {
                     id,
@@ -393,34 +399,25 @@ impl Database {
 
     pub fn is_valid_user_id(&self, id: u64) -> DbResult<bool> {
         let mut conn = self.pool.get_conn()?;
-        let value: Option<u8> = conn.exec_first(r"SELECT 1 FROM `accounts`
+        let value: Option<u8> = conn.exec_first(
+            r"SELECT 1 FROM `accounts`
             WHERE id = ?;",
-            (id,)
-        )?;
-        Ok(value.is_some())
-    }
-
-    pub fn is_valid_dm_group_id(&self, id: u64) -> DbResult<bool> {
-        let mut conn = self.pool.get_conn()?;
-        let value: Option<u8> = conn.exec_first(r"SELECT 1 FROM `dm_groups`
-            WHERE id = ?;",
-            (id,)
+            (id,),
         )?;
         Ok(value.is_some())
     }
 
     pub fn remove_dm_group(&self, group_id: u64) -> DbResult<()> {
         let mut conn = self.pool.get_conn()?;
-        Ok(conn.exec_drop(r"DELETE FROM `dm_groups`
+        Ok(conn.exec_drop(
+            r"DELETE FROM `dm_groups`
             WHERE id = ?",
             (group_id,),
         )?)
     }
 
-    /// # Safety:
-    /// Always safe. Marked as unsafe only to prevent complete data resets (e.g. when the wrong
-    /// option is selected in a code autocomplion menu).
-    pub unsafe fn reset(&self) -> DbResult<()> {
+    #[cfg(test)]
+    pub fn reset(&self) -> DbResult<()> {
         let mut conn = self.pool.get_conn()?;
         conn.query_drop("DROP TABLE IF EXISTS `accounts`;")?;
         conn.query_drop("DROP TABLE IF EXISTS `sessions`;")?;
@@ -435,18 +432,16 @@ impl Database {
     }
 }
 
-static RNG: LazyLock<Arc<Mutex<StdRng>>> = LazyLock::new(||
-    Arc::new(Mutex::new(StdRng::from_os_rng()))
-);
-pub static DB: LazyLock<Database> = LazyLock::new(||
-    Database::new(&std::env::var("DB_URL").unwrap())
-);
+static RNG: LazyLock<Arc<Mutex<StdRng>>> =
+    LazyLock::new(|| Arc::new(Mutex::new(StdRng::from_os_rng())));
+pub static DB: LazyLock<Database> =
+    LazyLock::new(|| Database::new(&std::env::var("DB_URL").unwrap()));
 
 // TODO: Move into another module
 pub mod rng {
-    use std::sync::{Arc, Mutex};
-    use rand::{rngs::StdRng, RngCore};
     use super::RNG;
+    use rand::{RngCore, rngs::StdRng};
+    use std::sync::{Arc, Mutex};
 
     pub fn get_rng() -> Arc<Mutex<StdRng>> {
         RNG.clone()
@@ -461,18 +456,17 @@ pub mod rng {
 mod tests {
     use std::sync::{LazyLock, Once};
 
-    use crate::{secret::db::Account, DmInvite};
+    use crate::{DmInvite, secret::db::Account};
 
     use super::Database;
 
-    static DB: LazyLock<Database> = LazyLock::new(||
-        Database::new(&std::env::var("TEST_DB_URL").unwrap())
-    );
+    static DB: LazyLock<Database> =
+        LazyLock::new(|| Database::new(&std::env::var("TEST_DB_URL").unwrap()));
     static INIT: Once = Once::new();
 
     fn init() {
         INIT.call_once(|| {
-            unsafe { DB.reset() }.unwrap();
+            DB.reset().unwrap();
         });
     }
 
@@ -488,37 +482,25 @@ mod tests {
             &[],
             Some("some_email@example.com"),
             Some("The first User"),
-        ).unwrap();
+        )
+        .unwrap();
         assert!(!DB.is_valid_user_id(0).unwrap());
         assert!(DB.is_valid_user_id(1).unwrap());
         assert!(!DB.is_valid_user_id(2).unwrap());
-        DB.create_account(
-            &[2],
-            &[],
-            None,
-            Some("The second user"),
-        ).unwrap();
+        DB.create_account(&[2], &[], None, Some("The second user"))
+            .unwrap();
         assert!(!DB.is_valid_user_id(0).unwrap());
         assert!(DB.is_valid_user_id(1).unwrap());
         assert!(DB.is_valid_user_id(2).unwrap());
         assert!(!DB.is_valid_user_id(3).unwrap());
-        DB.create_account(
-            &[3],
-            &[],
-            Some("third_user@example.com"),
-            None,
-        ).unwrap();
+        DB.create_account(&[3], &[], Some("third_user@example.com"), None)
+            .unwrap();
         assert!(!DB.is_valid_user_id(0).unwrap());
         assert!(DB.is_valid_user_id(1).unwrap());
         assert!(DB.is_valid_user_id(2).unwrap());
         assert!(DB.is_valid_user_id(3).unwrap());
         assert!(!DB.is_valid_user_id(4).unwrap());
-        DB.create_account(
-            &[4],
-            &[],
-            None,
-            None,
-        ).unwrap();
+        DB.create_account(&[4], &[], None, None).unwrap();
         assert!(!DB.is_valid_user_id(0).unwrap());
         assert!(DB.is_valid_user_id(1).unwrap());
         assert!(DB.is_valid_user_id(2).unwrap());
@@ -530,7 +512,8 @@ mod tests {
             &[],
             Some("different_account@example.com"),
             Some("Account 5"),
-        ).unwrap();
+        )
+        .unwrap();
         assert!(!DB.is_valid_user_id(0).unwrap());
         assert!(DB.is_valid_user_id(1).unwrap());
         assert!(DB.is_valid_user_id(2).unwrap());
@@ -590,25 +573,31 @@ mod tests {
             other_id: 1,
             encrypted: false,
         };
-        DB.add_dm_invite(invite1.initiator_id, invite1.other_id, invite1.encrypted).unwrap();
-        DB.add_dm_invite(invite2.initiator_id, invite2.other_id, invite2.encrypted).unwrap();
-        DB.add_dm_invite(invite3.initiator_id, invite3.other_id, invite3.encrypted).unwrap();
+        DB.add_dm_invite(invite1.initiator_id, invite1.other_id, invite1.encrypted)
+            .unwrap();
+        DB.add_dm_invite(invite2.initiator_id, invite2.other_id, invite2.encrypted)
+            .unwrap();
+        DB.add_dm_invite(invite3.initiator_id, invite3.other_id, invite3.encrypted)
+            .unwrap();
         assert_eq!(DB.get_sent_dm_invites(1).unwrap(), vec![invite1]);
         assert_eq!(DB.get_received_dm_invites(1).unwrap(), vec![invite3]);
         assert_eq!(DB.get_sent_dm_invites(2).unwrap(), vec![]);
-        assert_eq!(DB.get_received_dm_invites(2).unwrap(), vec![invite2, invite1]);
+        assert_eq!(
+            DB.get_received_dm_invites(2).unwrap(),
+            vec![invite2, invite1]
+        );
         assert_eq!(DB.get_sent_dm_invites(3).unwrap(), vec![invite3, invite2]);
         assert_eq!(DB.get_received_dm_invites(3).unwrap(), vec![]);
         DB.remove_dm_invite(3).unwrap();
         assert_eq!(DB.get_sent_dm_invites(1).unwrap(), vec![invite1]);
         assert_eq!(DB.get_received_dm_invites(1).unwrap(), vec![]);
         assert_eq!(DB.get_sent_dm_invites(2).unwrap(), vec![]);
-        assert_eq!(DB.get_received_dm_invites(2).unwrap(), vec![invite2, invite1]);
+        assert_eq!(
+            DB.get_received_dm_invites(2).unwrap(),
+            vec![invite2, invite1]
+        );
         assert_eq!(DB.get_sent_dm_invites(3).unwrap(), vec![invite2]);
         assert_eq!(DB.get_received_dm_invites(3).unwrap(), vec![]);
-        assert!(!DB.is_valid_dm_group_id(0).unwrap());
-        assert!(!DB.is_valid_dm_group_id(1).unwrap());
-        assert!(!DB.is_valid_dm_group_id(2).unwrap());
         assert!(!DB.is_in_dm_group(1, 1).unwrap());
         assert!(!DB.is_in_dm_group(2, 1).unwrap());
         assert!(!DB.is_in_dm_group(3, 1).unwrap());
@@ -622,12 +611,11 @@ mod tests {
         assert!(!DB.is_in_dm_group(1, 2).unwrap());
         assert!(!DB.is_in_dm_group(2, 2).unwrap());
         assert!(!DB.is_in_dm_group(3, 2).unwrap());
-        assert!(!DB.is_valid_dm_group_id(0).unwrap());
-        assert!(DB.is_valid_dm_group_id(1).unwrap());
-        assert!(!DB.is_valid_dm_group_id(2).unwrap());
         assert_eq!(dm_group1, 1);
-        DB.send_dm_message(1, dm_group1, "!plaintext", "Hello, World!".as_bytes(), None).unwrap();
-        DB.send_dm_message(2, dm_group1, "privatecipher123", &[0x69, 0x68], None).unwrap();
+        DB.send_dm_message(1, dm_group1, "!plaintext", "Hello, World!".as_bytes(), None)
+            .unwrap();
+        DB.send_dm_message(2, dm_group1, "privatecipher123", &[0x69, 0x68], None)
+            .unwrap();
         let dm_messages1 = DB.get_dm_messages(0, dm_group1, 1).unwrap();
         assert_eq!(dm_messages1[0].id, 1);
         assert_eq!(dm_messages1[0].encryption_method, "!plaintext");
@@ -665,10 +653,6 @@ mod tests {
         assert!(!DB.is_in_dm_group(1, 2).unwrap());
         assert!(DB.is_in_dm_group(2, 2).unwrap());
         assert!(DB.is_in_dm_group(3, 2).unwrap());
-        assert!(!DB.is_valid_dm_group_id(0).unwrap());
-        assert!(!DB.is_valid_dm_group_id(1).unwrap());
-        assert!(DB.is_valid_dm_group_id(2).unwrap());
         DB.remove_dm_group(dm_group2).unwrap();
-        assert!(!DB.is_valid_dm_group_id(2).unwrap());
     }
 }

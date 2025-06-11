@@ -1,8 +1,7 @@
-use dioxus::{logger::tracing::error, prelude::*};
+use dioxus::prelude::*;
 
 use server::AccountCredentials;
-use ui::Navbar;
-use views::{Home, RegisterAccount, LoginAccount, Contacts};
+use views::{Contacts, Home, LoginAccount, RegisterAccount};
 
 mod views;
 
@@ -25,31 +24,27 @@ pub enum Route {
 const MAIN_CSS: Asset = asset!("/assets/main.css");
 
 fn main() {
-    // TODO: Check if logged into account, then:
-    // TODO: Otherwise, show create account menu
-    // #[cfg(feature = "desktop")]
-    // {
-    //     use dioxus::desktop::Config;
-    //     use dioxus::desktop::WindowBuilder;
-    //
-    //     dioxus::LaunchBuilder::new()
-    //         .with_cfg(
-    //             Config::default()
-    //                 .with_menu(None)
-    //                 .with_window(
-    //                     WindowBuilder::new()
-    //                         .with_maximized(true)
-    //                         .with_title("Peregrine")
-    //                 )
-    //             )
-    //         .launch(App);
-    // }
-    // #[cfg(not(feature = "desktop"))]
-    #[cfg(feature = "server")]
+    #[cfg(all(feature = "desktop", not(debug_assertions)))]
+    {
+        use dioxus::desktop::Config;
+        use dioxus::desktop::WindowBuilder;
+
+        dioxus::LaunchBuilder::new()
+            .with_cfg(
+                Config::default().with_menu(None).with_window(
+                    WindowBuilder::new()
+                        .with_maximized(true)
+                        .with_title("Peregrine"),
+                ),
+            )
+            .launch(App);
+    }
+    #[cfg(all(not(feature = "desktop"), feature = "server"))]
     {
         server::init_server();
     }
 
+    #[cfg(any(not(feature = "desktop"), debug_assertions))]
     dioxus::launch(App);
 }
 
@@ -63,18 +58,9 @@ fn App() -> Element {
     }
 }
 
-/// A desktop-specific Router around the shared `Navbar` component
-/// which allows us to use the desktop-specific `Route` enum.
 #[component]
 fn DesktopNavbar() -> Element {
     rsx! {
-        // Navbar {
-        //     Link {
-        //         to: Route::Home {},
-        //         "Home"
-        //     }
-        // }
-
         Outlet::<Route> {}
     }
 }

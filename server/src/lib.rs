@@ -3,11 +3,12 @@ mod secret;
 
 use std::{fmt::Display, str::FromStr};
 
-use base64::{prelude::BASE64_URL_SAFE_NO_PAD, Engine};
+use base64::{Engine, prelude::BASE64_URL_SAFE_NO_PAD};
 #[cfg(feature = "server")]
-use dioxus::prelude::server_fn::ServerFn;
-use dioxus::{logger::tracing::{info, error, debug}, prelude::*};
+use dioxus::logger::tracing::{debug, error, info};
+use dioxus::prelude::*;
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "server")]
 use shared::limits::LIMITS;
 
 #[cfg(feature = "server")]
@@ -28,6 +29,7 @@ pub enum ServerError {
     InvalidArgumentSize,
     InvalidValue,
     InvalidUserId,
+    GroupDatabaseError,
 }
 
 impl FromStr for ServerError {
@@ -47,6 +49,7 @@ impl FromStr for ServerError {
             "InvalidArgumentSize" => Ok(Self::InvalidArgumentSize),
             "InvalidValue" => Ok(Self::InvalidValue),
             "InvalidUserId" => Ok(Self::InvalidUserId),
+            "GroupDatabaseError" => Ok(Self::GroupDatabaseError),
             _ => {
                 let Some(s_split) = s.split_once(':') else {
                     return Err(());
@@ -59,7 +62,7 @@ impl FromStr for ServerError {
                 } else {
                     Err(())
                 }
-            },
+            }
         }
     }
 }
@@ -80,6 +83,7 @@ impl Display for ServerError {
             Self::InvalidArgumentSize => "InvalidArgumentSize".to_owned(),
             Self::InvalidValue => "InvalidValue".to_owned(),
             Self::InvalidUserId => "InvalidUserId".to_owned(),
+            Self::GroupDatabaseError => "GroupDatabaseError".to_owned(),
         })?;
         Ok(())
     }
@@ -136,10 +140,7 @@ impl FromStr for AccountCredentials {
         }
         let id = u64::from_le_bytes(bytes[..8].try_into().unwrap());
         let session_token: [u8; 32] = bytes[8..].try_into().unwrap();
-        Ok(Self {
-            id,
-            session_token,
-        })
+        Ok(Self { id, session_token })
     }
 }
 
@@ -164,14 +165,20 @@ pub async fn create_account(
         || public_key.len() > LIMITS.max_public_key_length
         || username.len() > LIMITS.max_username_length
     {
-        return Err(ServerFnError::WrappedServerError(ServerError::InvalidArgumentSize));
+        return Err(ServerFnError::WrappedServerError(
+            ServerError::InvalidArgumentSize,
+        ));
     }
 
     match DB.create_account(
         &public_key,
         &[],
         Some(&email),
-        if username.is_empty() { None } else { Some(&username) },
+        if username.is_empty() {
+            None
+        } else {
+            Some(&username)
+        },
     ) {
         Ok(account_id) => {
             info!("New account created: {account_id}");
@@ -182,21 +189,17 @@ pub async fn create_account(
                 }
                 Err(err) => {
                     error!("Failed to create session: {err:?}");
-                    Err(
-                        ServerFnError::WrappedServerError(
-                            ServerError::CreateSessionDatabaseError
-                        )
-                    )
+                    Err(ServerFnError::WrappedServerError(
+                        ServerError::CreateSessionDatabaseError,
+                    ))
                 }
             }
         }
         Err(err) => {
             error!("Failed to create account: {err:?}");
-            Err(
-                ServerFnError::WrappedServerError(
-                    ServerError::CreateAccountDatabaseError
-                )
-            )
+            Err(ServerFnError::WrappedServerError(
+                ServerError::CreateAccountDatabaseError,
+            ))
         }
     }
 }
@@ -208,12 +211,16 @@ fn check_session(credentials: AccountCredentials) -> Result<(), ServerFnError<Se
             if is_valid {
                 Ok(())
             } else {
-                Err(ServerFnError::WrappedServerError(ServerError::InvalidSessionToken))
-            } 
+                Err(ServerFnError::WrappedServerError(
+                    ServerError::InvalidSessionToken,
+                ))
+            }
         }
         Err(err) => {
             error!("Failed to check if session is valid: {err:?}");
-            Err(ServerFnError::WrappedServerError(ServerError::InvalidSessionToken))
+            Err(ServerFnError::WrappedServerError(
+                ServerError::InvalidSessionToken,
+            ))
         }
     }
 }
@@ -225,12 +232,16 @@ fn check_user(user_id: u64) -> Result<(), ServerFnError<ServerError>> {
             if is_valid {
                 Ok(())
             } else {
-                Err(ServerFnError::WrappedServerError(ServerError::InvalidUserId))
+                Err(ServerFnError::WrappedServerError(
+                    ServerError::InvalidUserId,
+                ))
             }
         }
         Err(err) => {
             error!("Failed to check if specified user exists: {err:?}");
-            Err(ServerFnError::WrappedServerError(ServerError::InvalidUserId))
+            Err(ServerFnError::WrappedServerError(
+                ServerError::InvalidUserId,
+            ))
         }
     }
 }
@@ -241,7 +252,9 @@ pub async fn find_user(
     credentials: AccountCredentials,
 ) -> Result<Vec<FoundAccount>, ServerFnError<ServerError>> {
     if query.len() > LIMITS.max_email_length.max(LIMITS.max_username_length) {
-        return Err(ServerFnError::WrappedServerError(ServerError::InvalidArgumentSize));
+        return Err(ServerFnError::WrappedServerError(
+            ServerError::InvalidArgumentSize,
+        ));
     }
 
     check_session(credentials)?;
@@ -252,20 +265,20 @@ pub async fn find_user(
             found_accounts.reserve_exact(result.len());
 
             for account in result {
-                found_accounts.push(
-                    FoundAccount {
-                        id: account.id,
-                        username: account.username,
-                        email: account.email,
-                    },
-                );
+                found_accounts.push(FoundAccount {
+                    id: account.id,
+                    username: account.username,
+                    email: account.email,
+                });
             }
 
             Ok(found_accounts)
-        },
+        }
         Err(err) => {
             error!("Failed to find user: {err:?}");
-            Err(ServerFnError::WrappedServerError(ServerError::FindUserDatabaseError))
+            Err(ServerFnError::WrappedServerError(
+                ServerError::FindUserDatabaseError,
+            ))
         }
     }
 }
@@ -282,7 +295,9 @@ pub fn check_is_in_dm_group(user_id: u64, group_id: u64) -> Result<(), ServerFnE
         }
         Err(err) => {
             error!("Failed to check whether the user is in DM group or not: {err:?}");
-            Err(ServerFnError::WrappedServerError(ServerError::VerificationDatabaseError))
+            Err(ServerFnError::WrappedServerError(
+                ServerError::VerificationDatabaseError,
+            ))
         }
     }
 }
@@ -298,24 +313,24 @@ pub async fn send_dm_message(
     check_is_in_dm_group(credentials.id, group_id)?;
 
     if encryption_method.len() > LIMITS.max_encryption_method_length {
-        return Err(ServerFnError::WrappedServerError(ServerError::InvalidArgumentSize));
+        return Err(ServerFnError::WrappedServerError(
+            ServerError::InvalidArgumentSize,
+        ));
     }
 
     if message.len() > LIMITS.max_message_length {
-        return Err(ServerFnError::WrappedServerError(ServerError::InvalidArgumentSize));
+        return Err(ServerFnError::WrappedServerError(
+            ServerError::InvalidArgumentSize,
+        ));
     }
 
-    match DB.send_dm_message(
-        credentials.id,
-        group_id,
-        &encryption_method,
-        &message,
-        None,
-    ) {
+    match DB.send_dm_message(credentials.id, group_id, &encryption_method, &message, None) {
         Ok(id) => Ok(id),
         Err(err) => {
             error!("Failed to send DM message: {err:?}");
-            Err(ServerFnError::WrappedServerError(ServerError::SendMessageDatabaseError))
+            Err(ServerFnError::WrappedServerError(
+                ServerError::SendMessageDatabaseError,
+            ))
         }
     }
 }
@@ -333,7 +348,9 @@ pub async fn fetch_new_dm_messages(
         Ok(messages) => Ok(messages),
         Err(err) => {
             error!("Failed to fetch new DM messages: {err:?}");
-            Err(ServerFnError::WrappedServerError(ServerError::FetchMessagesDatabaseError))
+            Err(ServerFnError::WrappedServerError(
+                ServerError::FetchMessagesDatabaseError,
+            ))
         }
     }
 }
@@ -355,7 +372,9 @@ pub async fn send_dm_invite(
         Ok(id) => Ok(id),
         Err(err) => {
             error!("Failed to send DM invite: {err:?}");
-            Err(ServerFnError::WrappedServerError(ServerError::InviteDatabaseError))
+            Err(ServerFnError::WrappedServerError(
+                ServerError::InviteDatabaseError,
+            ))
         }
     }
 }
@@ -371,7 +390,9 @@ pub async fn accept_dm_invite(
         Ok(invite) => invite,
         Err(err) => {
             error!("Failed to get DM invite while trying to accept: {err:?}");
-            return Err(ServerFnError::WrappedServerError(ServerError::InviteDatabaseError));
+            return Err(ServerFnError::WrappedServerError(
+                ServerError::InviteDatabaseError,
+            ));
         }
     };
 
@@ -383,7 +404,9 @@ pub async fn accept_dm_invite(
         Ok(id) => id,
         Err(err) => {
             error!("Failed to create DM group while trying to accept invite: {err:?}");
-            return Err(ServerFnError::WrappedServerError(ServerError::InviteDatabaseError));
+            return Err(ServerFnError::WrappedServerError(
+                ServerError::InviteDatabaseError,
+            ));
         }
     };
 
@@ -391,7 +414,9 @@ pub async fn accept_dm_invite(
         Ok(()) => Ok(group_id),
         Err(err) => {
             error!("Failed to accept DM invite (after creating group): {err:?}");
-            Err(ServerFnError::WrappedServerError(ServerError::GroupPartiallyCreated(group_id)))
+            Err(ServerFnError::WrappedServerError(
+                ServerError::GroupPartiallyCreated(group_id),
+            ))
         }
     }
 }
@@ -407,7 +432,9 @@ pub async fn reject_dm_invite(
         Ok(invite) => invite,
         Err(err) => {
             error!("Failed to get DM invite while trying to reject: {err:?}");
-            return Err(ServerFnError::WrappedServerError(ServerError::InviteDatabaseError));
+            return Err(ServerFnError::WrappedServerError(
+                ServerError::InviteDatabaseError,
+            ));
         }
     };
 
@@ -419,7 +446,9 @@ pub async fn reject_dm_invite(
         Ok(()) => Ok(()),
         Err(err) => {
             error!("Failed to reject DM invite: {err:?}");
-            Err(ServerFnError::WrappedServerError(ServerError::InviteDatabaseError))
+            Err(ServerFnError::WrappedServerError(
+                ServerError::InviteDatabaseError,
+            ))
         }
     }
 }
@@ -434,7 +463,9 @@ pub async fn get_sent_dm_invites(
         Ok(invites) => Ok(invites),
         Err(err) => {
             error!("Failed to get sent DM invites: {err:?}");
-            Err(ServerFnError::WrappedServerError(ServerError::InviteDatabaseError))
+            Err(ServerFnError::WrappedServerError(
+                ServerError::InviteDatabaseError,
+            ))
         }
     }
 }
@@ -449,7 +480,9 @@ pub async fn get_received_dm_invites(
         Ok(invites) => Ok(invites),
         Err(err) => {
             error!("Failed to get received DM invites: {err:?}");
-            Err(ServerFnError::WrappedServerError(ServerError::InviteDatabaseError))
+            Err(ServerFnError::WrappedServerError(
+                ServerError::InviteDatabaseError,
+            ))
         }
     }
 }
@@ -465,7 +498,9 @@ pub async fn cancel_dm_invite(
         Ok(invite) => invite,
         Err(err) => {
             error!("Failed to get DM invite while trying to reject: {err:?}");
-            return Err(ServerFnError::WrappedServerError(ServerError::InviteDatabaseError));
+            return Err(ServerFnError::WrappedServerError(
+                ServerError::InviteDatabaseError,
+            ));
         }
     };
 
@@ -477,7 +512,28 @@ pub async fn cancel_dm_invite(
         Ok(()) => Ok(()),
         Err(err) => {
             error!("Failed to cancel DM invite: {err:?}");
-            Err(ServerFnError::WrappedServerError(ServerError::InviteDatabaseError))
+            Err(ServerFnError::WrappedServerError(
+                ServerError::InviteDatabaseError,
+            ))
+        }
+    }
+}
+
+#[server]
+pub async fn leave_dm_group(
+    group_id: u64,
+    credentials: AccountCredentials,
+) -> Result<(), ServerFnError<ServerError>> {
+    check_session(credentials)?;
+    check_is_in_dm_group(credentials.id, group_id)?;
+
+    match DB.remove_dm_group(group_id) {
+        Ok(()) => Ok(()),
+        Err(err) => {
+            error!("Failed to leave DM group: {err:?}");
+            Err(ServerFnError::WrappedServerError(
+                ServerError::GroupDatabaseError,
+            ))
         }
     }
 }

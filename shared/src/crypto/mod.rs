@@ -5,31 +5,28 @@ use std::fmt::Debug;
 
 use rand::RngCore;
 
-pub trait SymmetricCipher<Rng: RandomNumberGenerator> : Debug + Clone {
+pub trait SymmetricCipher<Rng: RandomNumberGenerator>: Debug + Clone {
     fn encrypt(&mut self, data: &[u8], rng: &mut Rng) -> Box<[u8]>;
     fn decrypt(&mut self, data: &[u8]) -> Option<Box<[u8]>>;
 
     fn into_key_bytes(self) -> Box<[u8]>;
 }
 
-pub trait AsymmetricCipherPrivate<Rng: RandomNumberGenerator> : Debug + Clone {
-    // fn encrypt(&mut self, data: &[u8]) -> Box<[u8]>;
+pub trait AsymmetricCipherPrivate<Rng: RandomNumberGenerator>: Debug + Clone {
     fn sign(&mut self, data: &[u8], rng: &mut Rng) -> Box<[u8]>;
 
     fn into_private_key_bytes(self) -> Box<[u8]>;
 }
 
-pub trait AsymmetricCipherPublic : Debug + Clone {
-    // fn decrypt(&mut self, data: &[u8]) -> Option<Box<[u8]>>;
+pub trait AsymmetricCipherPublic: Debug + Clone {
     fn verify(&mut self, data: &[u8], signature: &[u8]) -> bool;
 
     fn into_public_key_bytes(self) -> Box<[u8]>;
 }
 
-pub trait AsymmetricCipher<
-    Rng: RandomNumberGenerator,
-    CipherSym: SymmetricCipher<Rng>,
-> : AsymmetricCipherPrivate<Rng> + AsymmetricCipherPublic {
+pub trait AsymmetricCipher<Rng: RandomNumberGenerator, CipherSym: SymmetricCipher<Rng>>:
+    AsymmetricCipherPrivate<Rng> + AsymmetricCipherPublic
+{
     fn diffie_hellman(&mut self, other_pubkey: &[u8]) -> CipherSym;
 }
 
@@ -37,7 +34,8 @@ pub trait KeyDerivationAlgorithm<
     Rng: RandomNumberGenerator,
     CipherSym: SymmetricCipher<Rng>,
     CipherAsym: AsymmetricCipher<Rng, CipherSym>,
-> {
+>
+{
     fn as_symmetric_key(&mut self, password: &[u8]) -> CipherSym;
     fn as_asymmetric_key(&mut self, password: &[u8]) -> CipherAsym;
 }
@@ -73,7 +71,8 @@ impl<
     CipherAsym: AsymmetricCipher<Rng, CipherSym>,
     Kdf: KeyDerivationAlgorithm<Rng, CipherSym, CipherAsym>,
     Hash: HashAlgorithm,
-> CryptographyAlgorithmSet<Rng, CipherSym, CipherAsym, Kdf, Hash> {
+> CryptographyAlgorithmSet<Rng, CipherSym, CipherAsym, Kdf, Hash>
+{
     pub fn new(mut kdf: Kdf, hash: Hash, rng: Rng, password: &[u8]) -> Self {
         Self {
             symmetric_cipher: kdf.as_symmetric_key(password),

@@ -1,5 +1,14 @@
-use super::{AsymmetricCipher, AsymmetricCipherPrivate, AsymmetricCipherPublic, CryptographyAlgorithmSet, HashAlgorithm, KeyDerivationAlgorithm, RandomNumberGenerator, SymmetricCipher};
-use bee2_rs::{bash_hash::Bash512, belt::{BeltEncryptionAlgorithm, BeltKey256}, bign::{BignKey, BignParameters, BignParametersConfiguration}, brng::{Brng, CtrRng}, errors::Bee2Result};
+use super::{
+    AsymmetricCipher, AsymmetricCipherPrivate, AsymmetricCipherPublic, CryptographyAlgorithmSet,
+    HashAlgorithm, KeyDerivationAlgorithm, RandomNumberGenerator, SymmetricCipher,
+};
+use bee2_rs::{
+    bash_hash::Bash512,
+    belt::{BeltEncryptionAlgorithm, BeltKey256},
+    bign::{BignKey, BignParameters, BignParametersConfiguration},
+    brng::{Brng, CtrRng},
+    errors::Bee2Result,
+};
 
 #[derive(Debug, Clone)]
 pub struct Belt256 {
@@ -10,10 +19,7 @@ pub struct Belt256 {
 impl Belt256 {
     pub fn new(key: [u8; 32]) -> Self {
         let belt_key = BeltKey256::new(key);
-        Self {
-            key,
-            belt_key,
-        }
+        Self { key, belt_key }
     }
 }
 
@@ -24,7 +30,8 @@ impl SymmetricCipher<CtrRng> for Belt256 {
         iv.reserve_exact(16);
         iv.extend([0u8; 16]);
         RandomNumberGenerator::next_buffer(rng, &mut iv);
-        let ciphertext = self.belt_key
+        let ciphertext = self
+            .belt_key
             .clone()
             .ctr((*iv.as_slice()).try_into().unwrap())
             .encrypt(data);
@@ -62,9 +69,7 @@ impl Bign {
     pub fn try_new(public_key: &[u8], private_key: Option<&[u8]>) -> Bee2Result<Self> {
         if let Some(private_key) = private_key {
             let bign_key = BignKey::try_load(
-                BignParameters::try_new(
-                    BignParametersConfiguration::B3,
-                )?,
+                BignParameters::try_new(BignParametersConfiguration::B3)?,
                 public_key,
                 private_key,
             )?;
@@ -87,9 +92,7 @@ impl AsymmetricCipherPublic for Bign {
         let bign_key = BignKey {
             public_key: Box::new([]),
             private_key: Box::new([]),
-            params: BignParameters::try_new(
-                BignParametersConfiguration::B3,
-            ).unwrap(),
+            params: BignParameters::try_new(BignParametersConfiguration::B3).unwrap(),
         };
         let hash = Bash512::hash(data).unwrap();
         bign_key.verify(&self.pub_key, &hash, signature).is_ok()
@@ -113,7 +116,8 @@ impl AsymmetricCipherPrivate<CtrRng> for Bign {
 
 impl AsymmetricCipher<CtrRng, Belt256> for Bign {
     fn diffie_hellman(&mut self, other_pubkey: &[u8]) -> Belt256 {
-        let key_bytes = self.priv_data
+        let key_bytes = self
+            .priv_data
             .as_mut()
             .unwrap()
             .1
@@ -141,17 +145,13 @@ impl KeyDerivationAlgorithm<CtrRng, Belt256, Bign> for Pbkdf2 {
         let key_bytes: [u8; 32] = *tmp_key.get_bytes();
         let mut rng = CtrRng::new(key_bytes, None);
         let bign_key = BignKey::try_new(
-            BignParameters::try_new(
-                BignParametersConfiguration::B3,
-            ).unwrap(),
+            BignParameters::try_new(BignParametersConfiguration::B3).unwrap(),
             &mut rng,
-        ).unwrap();
+        )
+        .unwrap();
         Bign {
             pub_key: bign_key.public_key.clone(),
-            priv_data: Some((
-                bign_key.private_key.clone(),
-                bign_key
-            )),
+            priv_data: Some((bign_key.private_key.clone(), bign_key)),
         }
     }
 }

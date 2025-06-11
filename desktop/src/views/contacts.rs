@@ -1,18 +1,12 @@
 use dioxus::{logger::tracing::error, prelude::*};
 use server::{AccountCredentials, FoundAccount};
 
-use crate::Route;
-
 #[component]
 pub fn Contacts(credentials: AccountCredentials) -> Element {
     let mut found_users: Signal<Vec<FoundAccount>> = use_signal(Vec::new);
-    // let mut user_h1s = found_users.iter().map(|user| {
-    //     rsx! { h1 { a: format!("User {} (username={:?}, email={:?})", user.id, user.username, user.email) } }
-    // });
     rsx! {
         div {
             class: "twopanel-container",
-            // height: "100vh",
 
             div {
                 class: "twopanel twopanel-left",
@@ -26,7 +20,7 @@ pub fn Contacts(credentials: AccountCredentials) -> Element {
                     placeholder: "Search",
                     oninput: move |event| async move {
                         let query = event.value();
-                        let data = match server::find_user(query, credentials).await {
+                        match server::find_user(query, credentials).await {
                             Ok(data) => found_users.set(data),
                             Err(err) => error!("Error while trying to find user: {err:?}"),
                         };
@@ -38,7 +32,6 @@ pub fn Contacts(credentials: AccountCredentials) -> Element {
 
                     for user in found_users() {
                         User { key: user.id, account: user }
-                        // input { value: format!("User {} (username={:?}, email={:?})", user.id, user.username, user.email) }
                     }
                 }
             }
@@ -62,7 +55,9 @@ pub fn User(account: FoundAccount) -> Element {
             .with_format(ImageFormat::Avif)
     );
 
-    let title = account.username.unwrap_or(account.email.clone().unwrap_or("Anonymous".to_owned()));
+    let title = account
+        .username
+        .unwrap_or(account.email.clone().unwrap_or("Anonymous".to_owned()));
     let email = account.email.unwrap_or("Hidden email".to_owned());
     rsx! {
         div {
