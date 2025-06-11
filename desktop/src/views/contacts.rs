@@ -31,7 +31,7 @@ pub fn Contacts(credentials: AccountCredentials) -> Element {
                     class: "noselect",
 
                     for user in found_users() {
-                        User { key: user.id, account: user }
+                        User { key: user.id, account: user.clone() }
                     }
                 }
             }
