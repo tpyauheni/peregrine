@@ -8,6 +8,7 @@ rand = "0.9"
 
 [dependencies.bee2-rs]
 git = "ssh://git@github.com/tpyauheni/bee2-rs.git"
+version = "0.2"
 features = ["belt-ctr", "belt-hmac", "belt-pbkdf2", "bign", "bash-full"]
 optional = true
 

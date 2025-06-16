@@ -4,9 +4,10 @@ mod secret;
 use std::{fmt::Display, str::FromStr};
 
 use base64::{Engine, prelude::BASE64_URL_SAFE_NO_PAD};
+use chrono::{DateTime, TimeDelta, Utc};
 #[cfg(feature = "server")]
 use dioxus::logger::tracing::{debug, error, info};
-use dioxus::prelude::*;
+use dioxus::prelude::{server_fn::ServerFn, *};
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "server")]
 use shared::limits::LIMITS;
@@ -14,7 +15,7 @@ use shared::limits::LIMITS;
 #[cfg(feature = "server")]
 use crate::secret::db::DB;
 
-#[derive(Debug)]
+#[derive(Debug, PartialEq)]
 pub enum ServerError {
     CreateAccountDatabaseError,
     CreateSessionDatabaseError,
@@ -30,6 +31,13 @@ pub enum ServerError {
     InvalidValue,
     InvalidUserId,
     GroupDatabaseError,
+    LimitExceeded,
+    SignatureEarly,
+    SignatureExpired,
+    InvalidSignature,
+    UnsupportedCryptographicAlgorithm,
+    AccountNotFound,
+    LoginAccountDatabaseError,
 }
 
 impl FromStr for ServerError {
@@ -50,6 +58,13 @@ impl FromStr for ServerError {
             "InvalidValue" => Ok(Self::InvalidValue),
             "InvalidUserId" => Ok(Self::InvalidUserId),
             "GroupDatabaseError" => Ok(Self::GroupDatabaseError),
+            "LimitExceeded" => Ok(Self::LimitExceeded),
+            "SignatureEarly" => Ok(Self::SignatureEarly),
+            "SignatureExpired" => Ok(Self::SignatureExpired),
+            "InvalidSignature" => Ok(Self::InvalidSignature),
+            "UnsupportedCryptographicAlgorithm" => Ok(Self::UnsupportedCryptographicAlgorithm),
+            "AccountNotFound" => Ok(Self::AccountNotFound),
+            "LoginAccountDatabaseError" => Ok(Self::LoginAccountDatabaseError),
             _ => {
                 let Some(s_split) = s.split_once(':') else {
                     return Err(());
@@ -84,6 +99,13 @@ impl Display for ServerError {
             Self::InvalidValue => "InvalidValue".to_owned(),
             Self::InvalidUserId => "InvalidUserId".to_owned(),
             Self::GroupDatabaseError => "GroupDatabaseError".to_owned(),
+            Self::LimitExceeded => "LimitExceeded".to_owned(),
+            Self::SignatureEarly => "SignatureEarly".to_owned(),
+            Self::SignatureExpired => "SignatureExpired".to_owned(),
+            Self::InvalidSignature => "InvalidSignature".to_owned(),
+            Self::UnsupportedCryptographicAlgorithm => "UnsupportedCryptographicAlgorithm".to_owned(),
+            Self::AccountNotFound => "AccountNotFound".to_owned(),
+            Self::LoginAccountDatabaseError => "LoginAccountDatabaseError".to_owned(),
         })?;
         Ok(())
     }
@@ -101,6 +123,7 @@ pub struct Account {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FoundAccount {
     pub id: u64,
+    pub public_key: Box<[u8]>,
     pub username: Option<String>,
     pub email: Option<String>,
 }
@@ -130,6 +153,20 @@ pub struct DmInvite {
     pub encrypted: bool,
 }
 
+/// Describes parameters of a requested session.
+/// `current_timestamp` is the current time in seconds since Unix epoch;
+/// Signature of a session request is considered valid if timestamp in server is in range
+/// `[current_timestamp - authorize_before_seconds; current_timestamp + authorize_after_seconds]`.
+/// If it is valid and no errors occur, server issues session token which is valid until
+/// `current_timestamp + session_validity_seconds`.
+#[derive(Debug, Serialize, Deserialize, Clone)]
+pub struct SessionParams {
+    pub current_timestamp: u64,
+    pub authorize_before_seconds: u32,
+    pub authorize_after_seconds: u32,
+    pub session_validity_seconds: u32,
+}
+
 impl FromStr for AccountCredentials {
     type Err = usize;
 
@@ -155,12 +192,23 @@ impl Display for AccountCredentials {
     }
 }
 
+impl SessionParams {
+    pub fn to_boxed_slice(&self) -> Box<[u8]> {
+        let mut result: Vec<u8> = vec![];
+        result.extend(self.current_timestamp.to_le_bytes());
+        result.extend(self.authorize_before_seconds.to_le_bytes());
+        result.extend(self.authorize_after_seconds.to_le_bytes());
+        result.extend(self.session_validity_seconds.to_le_bytes());
+        result.into_boxed_slice()
+    }
+}
+
 #[server]
 pub async fn create_account(
     email: String,
     username: String,
     public_key: Box<[u8]>,
-) -> Result<[u8; 32], ServerFnError<ServerError>> {
+) -> Result<(u64, [u8; 32]), ServerFnError<ServerError>> {
     if email.len() > LIMITS.max_email_length
         || public_key.len() > LIMITS.max_public_key_length
         || username.len() > LIMITS.max_username_length
@@ -185,7 +233,7 @@ pub async fn create_account(
             match DB.create_session(account_id, None, None) {
                 Ok(session_id) => {
                     debug!("New session created: {session_id:?}");
-                    Ok(session_id)
+                    Ok((account_id, session_id))
                 }
                 Err(err) => {
                     error!("Failed to create session: {err:?}");
@@ -199,6 +247,72 @@ pub async fn create_account(
             error!("Failed to create account: {err:?}");
             Err(ServerFnError::WrappedServerError(
                 ServerError::CreateAccountDatabaseError,
+            ))
+        }
+    }
+}
+
+#[server]
+pub async fn login_account(
+    id: u64,
+    login_algorithm: String,
+    public_key: Box<[u8]>,
+    session_params: SessionParams,
+    signature: Box<[u8]>,
+) -> Result<[u8; 32], ServerFnError<ServerError>> {
+    if session_params.authorize_before_seconds >= LIMITS.max_session_before_period
+        || session_params.authorize_after_seconds >= LIMITS.max_session_after_period
+        || session_params.session_validity_seconds >= LIMITS.max_session_validity_period
+    {
+        return Err(ServerFnError::WrappedServerError(ServerError::LimitExceeded));
+    }
+    let current_time = Utc::now();
+    let Some(expiration_seconds) = TimeDelta::try_seconds(session_params.session_validity_seconds as i64) else {
+        return Err(ServerFnError::WrappedServerError(ServerError::LimitExceeded));
+    };
+    let Some(expiration_time) = current_time.checked_add_signed(expiration_seconds) else {
+        return Err(ServerFnError::WrappedServerError(ServerError::LimitExceeded));
+    };
+    let unix_secs_now = current_time.signed_duration_since(DateTime::UNIX_EPOCH).num_seconds().cast_unsigned();
+
+    if unix_secs_now < session_params.current_timestamp - session_params.authorize_before_seconds as u64 {
+        return Err(ServerFnError::WrappedServerError(ServerError::SignatureEarly))
+    }
+    if unix_secs_now > session_params.current_timestamp + session_params.authorize_after_seconds as u64 {
+        return Err(ServerFnError::WrappedServerError(ServerError::SignatureExpired))
+    }
+
+    let data = &session_params.to_boxed_slice();
+
+    let Some(result) = shared::crypto::verify(&login_algorithm, &public_key, data, &signature) else {
+        return Err(ServerFnError::WrappedServerError(ServerError::UnsupportedCryptographicAlgorithm));
+    };
+
+    if !result {
+        return Err(ServerFnError::WrappedServerError(ServerError::InvalidSignature));
+    }
+
+    match DB.has_user_pubkey(id, &public_key) {
+        Ok(result) => {
+            if !result {
+                return Err(ServerFnError::WrappedServerError(ServerError::AccountNotFound));
+            }
+        }
+        Err(err) => {
+            error!("Failed to check if user has pubkey while loggin into account: {err:?}");
+            return Err(ServerFnError::WrappedServerError(ServerError::LoginAccountDatabaseError));
+        }
+    }
+
+    match DB.create_session(id, Some(current_time.naive_utc()), Some(expiration_time.naive_utc())) {
+        Ok(session_id) => {
+            debug!("New session created: {session_id:?}");
+            Ok(session_id)
+        }
+        Err(err) => {
+            error!("Failed to create login session: {err:?}");
+            Err(ServerFnError::WrappedServerError(
+                ServerError::CreateSessionDatabaseError,
             ))
         }
     }
@@ -221,6 +335,20 @@ fn check_session(credentials: AccountCredentials) -> Result<(), ServerFnError<Se
             Err(ServerFnError::WrappedServerError(
                 ServerError::InvalidSessionToken,
             ))
+        }
+    }
+}
+
+#[server]
+pub async fn are_session_credentials_valid(credentials: AccountCredentials) -> Result<bool, ServerFnError<ServerError>> {
+    match check_session(credentials) {
+        Ok(()) => Ok(true),
+        Err(err) => {
+            if err == ServerFnError::WrappedServerError(ServerError::InvalidSessionToken) {
+                Ok(false)
+            } else {
+                Err(err)
+            }
         }
     }
 }
@@ -259,7 +387,7 @@ pub async fn find_user(
 
     check_session(credentials)?;
 
-    match DB.find_user(&query) {
+    match DB.find_user(&query, credentials.id) {
         Ok(result) => {
             let mut found_accounts = vec![];
             found_accounts.reserve_exact(result.len());
@@ -267,6 +395,7 @@ pub async fn find_user(
             for account in result {
                 found_accounts.push(FoundAccount {
                     id: account.id,
+                    public_key: account.public_key,
                     username: account.username,
                     email: account.email,
                 });

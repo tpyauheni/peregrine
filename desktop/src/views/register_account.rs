@@ -1,4 +1,6 @@
+use client::storage::STORAGE;
 use dioxus::{logger::tracing::info, prelude::*};
+use server::AccountCredentials;
 use shared::crypto::AsymmetricCipherPublic;
 
 use crate::Route;
@@ -169,10 +171,17 @@ pub fn RegisterAccount() -> Element {
             "Submitting form: email='{email}', username='{username}', server='{server}', public_key={public_key:?}"
         );
         error_sig.set(None);
-        let session_token =
+        let (account_id, session_token) =
             server::create_account(email.to_owned(), username.to_owned(), public_key)
                 .await
                 .unwrap();
+        let login_credentials = AccountCredentials {
+            id: account_id,
+            session_token,
+        };
+        STORAGE.store_session_credentials(login_credentials);
+        let nav = navigator();
+        nav.replace(Route::Contacts { credentials: login_credentials });
         info!("Form submitted, session token: {session_token:?}");
     }
 

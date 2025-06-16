@@ -184,3 +184,16 @@ pub(crate) fn cryptoset(password: &[u8], iv: [u8; 32]) -> CryptoSet {
     let rng = CtrRng::new(kdf.as_symmetric_key(password).key, Some(iv));
     CryptographyAlgorithmSet::new(kdf, hash, rng, password)
 }
+
+pub(crate) fn hash(data: &[u8]) -> Box<[u8]> {
+    Bash512::hash(data).unwrap()
+}
+
+pub(crate) fn verify(public_key: &[u8], hash: &[u8], signature: &[u8]) -> bool {
+    let key = bee2_rs::bign::BignKey {
+        private_key: Box::new([]),
+        public_key: Box::from(public_key),
+        params: BignParameters::try_new(BignParametersConfiguration::B3).unwrap(),
+    };
+    key.verify(public_key, hash, signature).is_ok()
+}

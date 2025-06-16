@@ -155,7 +155,12 @@ impl Database {
                 `session_token`,
                 `begin_time`,
                 `end_time`
-            ) VALUES (?, ?, IFNULL(?, CURRENT_TIMESTAMP()), IFNULL(?, DATE_ADD(NOW(), INTERVAL 7 DAY)));",
+            ) VALUES (
+                ?,
+                ?,
+                IFNULL(?, CURRENT_TIMESTAMP()),
+                IFNULL(?, DATE_ADD(NOW(), INTERVAL 7 DAY))
+            );",
             (
                 account_id,
                 session_token,
@@ -166,16 +171,18 @@ impl Database {
         Ok(session_token)
     }
 
-    pub fn find_user(&self, query: &str) -> DbResult<Vec<Account>> {
+    pub fn find_user(&self, query: &str, ignore_user: u64) -> DbResult<Vec<Account>> {
         let mut conn = self.pool.get_conn()?;
         let query = format!("%{query}%");
         let accounts = conn.exec_map(
             r"SELECT * FROM `accounts`
-                WHERE `username` LIKE :query
-                    OR `email` LIKE :query
+                WHERE (`username` LIKE :query
+                    OR `email` LIKE :query)
+                    AND `id` != :ignore_user
                 LIMIT 10;",
             params! {
                 query,
+                ignore_user,
             },
             |(id, public_key, encrypted_private_info, email, username)| Account {
                 id,
@@ -416,6 +423,17 @@ impl Database {
         )?)
     }
 
+    pub fn has_user_pubkey(&self, account_id: u64, public_key: &[u8]) -> DbResult<bool> {
+        let mut conn = self.pool.get_conn()?;
+        let account: Option<u8> = conn.exec_first(
+            r"SELECT 1 FROM `accounts`
+            WHERE `id` = ?
+                AND `public_key` = ?;",
+                (account_id, public_key),
+            )?;
+        Ok(account.is_some())
+    }
+
     #[cfg(test)]
     pub fn reset(&self) -> DbResult<()> {
         let mut conn = self.pool.get_conn()?;
@@ -522,7 +540,7 @@ mod tests {
         assert!(DB.is_valid_user_id(5).unwrap());
         assert!(!DB.is_valid_user_id(6).unwrap());
         assert_eq!(
-            DB.find_user("user").unwrap(),
+            DB.find_user("user", 0).unwrap(),
             vec![
                 Account {
                     id: 1,
@@ -537,6 +555,25 @@ mod tests {
                     encrypted_private_info: Box::new([]),
                     email: None,
                     username: Some("The second user".to_owned()),
+                },
+                Account {
+                    id: 3,
+                    public_key: Box::new([3]),
+                    encrypted_private_info: Box::new([]),
+                    email: Some("third_user@example.com".to_owned()),
+                    username: None,
+                },
+            ],
+        );
+        assert_eq!(
+            DB.find_user("user", 2).unwrap(),
+            vec![
+                Account {
+                    id: 1,
+                    public_key: Box::new([1]),
+                    encrypted_private_info: Box::new([]),
+                    email: Some("some_email@example.com".to_owned()),
+                    username: Some("The first User".to_owned()),
                 },
                 Account {
                     id: 3,

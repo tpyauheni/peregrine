@@ -12,6 +12,9 @@ pub fn Contacts(credentials: AccountCredentials) -> Element {
                 class: "twopanel twopanel-left",
                 min_width: "400px",
                 max_width: "30vw",
+                display: "flex",
+                flex_direction: "column",
+                height: "100%",
                 input {
                     width: "100%",
                     height: "32px",
@@ -31,7 +34,27 @@ pub fn Contacts(credentials: AccountCredentials) -> Element {
                     class: "noselect",
 
                     for user in found_users() {
-                        User { key: user.id, account: user.clone() }
+                        User { key: user.id, account: user.clone(), credentials }
+                    }
+                }
+                div {
+                    flex_grow: 1,
+                    margin: 0,
+                }
+                div {
+                    height: "30px",
+                    a {
+                        onclick: move |_| async move {
+                            let invites = match server::get_received_dm_invites(credentials).await {
+                                Ok(invites) => invites,
+                                Err(err) => {
+                                    eprintln!("Error when tried to receive DM invites: {err:?}");
+                                    return;
+                                }
+                            };
+                            println!("Received invites: {invites:?}");
+                        },
+                        "Invites",
                     }
                 }
             }
@@ -44,7 +67,7 @@ pub fn Contacts(credentials: AccountCredentials) -> Element {
 }
 
 #[component]
-pub fn User(account: FoundAccount) -> Element {
+pub fn User(account: FoundAccount, credentials: AccountCredentials) -> Element {
     const ICON_TRANSPARENT: Asset = asset!(
         "/assets/icon_transparent.png",
         ImageAssetOptions::new()
@@ -62,23 +85,36 @@ pub fn User(account: FoundAccount) -> Element {
     rsx! {
         div {
             class: "panel-nonround",
-            width: "100%",
-            height: "48px",
+            max_width: "100%",
+            max_height: "48px",
             padding: "16px",
             padding_top: "12px",
             padding_bottom: "12px",
             display: "flex",
             align_items: "center",
             justify_content: "center",
+            onclick: move |_| async move {
+                match server::send_dm_invite(account.id, false, credentials).await {
+                    Ok(invite_id) => {
+                        println!("Sent invite: {invite_id:?}");
+                    }
+                    Err(err) => {
+                        eprintln!("Error from server: {err:?}");
+                    }
+                }
+                println!("User {:?} clicked", account.id);
+            },
 
             div {
+                margin: "0",
                 flex: "0 3 48px",
+                max_height: "46px",
 
                 img {
                     src: ICON_TRANSPARENT,
                     margin_right: "24px",
-                    width: "48px",
-                    height: "48px",
+                    width: "46px",
+                    max_height: "46px",
                 }
             }
             div {
@@ -87,7 +123,7 @@ pub fn User(account: FoundAccount) -> Element {
                 h3 {
                     padding: 0,
                     margin: 0,
-                    {title}
+                    {title.clone()}
                 }
                 p {
                     padding: 0,

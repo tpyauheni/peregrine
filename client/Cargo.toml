@@ -5,3 +5,7 @@ edition = "2024"
 
 [dependencies]
 server = { workspace = true }
+platform-dirs = "0.3.0"
+serde = "1.0"
+postcard = { version = "1.1", features = ["use-std"] }
+atomic-write-file = "0.2"

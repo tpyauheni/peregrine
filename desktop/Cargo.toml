@@ -10,6 +10,7 @@ ui = { workspace = true }
 client = { workspace = true }
 server = { workspace = true }
 shared = { workspace = true }
+tokio = { version = "1.45", features = ["time"] }
 
 [features]
 default = []

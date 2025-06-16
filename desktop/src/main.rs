@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 
 use server::AccountCredentials;
-use views::{Contacts, Home, LoginAccount, RegisterAccount};
+use views::{Contacts, Home, LoginAccount, RegisterAccount, SessionValidityChecker};
 
 mod views;
 
@@ -19,6 +19,9 @@ pub enum Route {
         RegisterAccount {},
         #[route("/signup")]
         LoginAccount {},
+    #[end_nest]
+    #[route("/check_session/:credentials")]
+    SessionValidityChecker { credentials: AccountCredentials },
 }
 
 const MAIN_CSS: Asset = asset!("/assets/main.css");

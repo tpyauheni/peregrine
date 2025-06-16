@@ -110,3 +110,20 @@ pub fn default_cryptoset(password: &[u8], iv: Option<[u8; 32]>) -> bee2rs::Crypt
 }
 #[cfg(not(feature = "bee2-rs"))]
 compile_error!("No cryptography algorithm sets configured");
+
+pub fn hash(alg_name: &str, data: &[u8]) -> Option<Box<[u8]>> {
+    match alg_name {
+        #[cfg(feature = "bee2-rs")]
+        "bycrypto" => Some(bee2rs::hash(data)),
+        _ => None,
+    }
+}
+
+pub fn verify(alg_name: &str, public_key: &[u8], data: &[u8], signature: &[u8]) -> Option<bool> {
+    let hash = hash(alg_name, data)?;
+    match alg_name {
+        #[cfg(feature = "bee2-rs")]
+        "bycrypto" => Some(bee2rs::verify(public_key, &hash, signature)),
+        _ => None,
+    }
+}
