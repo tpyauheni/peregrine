@@ -601,10 +601,12 @@ name = "client"
 version = "0.1.0"
 dependencies = [
  "atomic-write-file",
+ "dioxus",
  "platform-dirs",
  "postcard",
  "serde",
  "server",
+ "tokio",
 ]
 
 [[package]]

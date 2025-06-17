@@ -1,6 +1,8 @@
 use dioxus::{logger::tracing::error, prelude::*};
 use server::{AccountCredentials, FoundAccount};
 
+use crate::Route;
+
 #[component]
 pub fn Contacts(credentials: AccountCredentials) -> Element {
     let mut found_users: Signal<Vec<FoundAccount>> = use_signal(Vec::new);
@@ -44,15 +46,9 @@ pub fn Contacts(credentials: AccountCredentials) -> Element {
                 div {
                     height: "30px",
                     a {
-                        onclick: move |_| async move {
-                            let invites = match server::get_received_dm_invites(credentials).await {
-                                Ok(invites) => invites,
-                                Err(err) => {
-                                    eprintln!("Error when tried to receive DM invites: {err:?}");
-                                    return;
-                                }
-                            };
-                            println!("Received invites: {invites:?}");
+                        onclick: move |_| {
+                            let nav = navigator();
+                            nav.push(Route::Invites { credentials });
                         },
                         "Invites",
                     }

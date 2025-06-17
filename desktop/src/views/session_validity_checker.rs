@@ -1,68 +1,29 @@
-use std::time::Duration;
-
+use client::{future_retry_loop, packet_sender::{PacketSender, PacketState}};
 use dioxus::prelude::*;
 use server::AccountCredentials;
 
-use crate::{views::Contacts, Route};
-
-#[derive(Clone, Copy, PartialEq, Eq)]
-pub enum AuthenticationState {
-    ValidCredentials,
-    InvalidCredentials,
-    Waiting,
-    ServerError,
-}
-
-pub static WAIT_TIMEOUT: Duration = Duration::from_secs(10);
-pub static RETRY_INTERVAL: Duration = Duration::from_secs(3);
+use crate::Route;
 
 #[component]
 pub fn SessionValidityChecker(credentials: AccountCredentials) -> Element {
-    let mut result = use_signal(|| AuthenticationState::Waiting);
-    use_future(move || async move {
-        loop {
-            let Ok(value) = tokio::time::timeout(
-                WAIT_TIMEOUT,
-                server::are_session_credentials_valid(credentials)
-            ).await else {
-                continue;
-            };
-            let state = match value {
-                Ok(value) => {
-                    if value {
-                        AuthenticationState::ValidCredentials
-                    } else {
-                        AuthenticationState::InvalidCredentials
-                    }
-                }
-                Err(_err) => {
-                    AuthenticationState::ServerError
-                }
-            };
-            result.set(state);
-            if state != AuthenticationState::ServerError {
-                break;
-            }
-            tokio::time::sleep(RETRY_INTERVAL).await;
-            result.set(AuthenticationState::Waiting);
-        }
-    });
-    let value = *result.read();
     let nav = navigator();
-    let state_data = match value {
-        AuthenticationState::ValidCredentials => {
+    let state_data = match future_retry_loop!(server::are_session_credentials_valid(credentials)) {
+        PacketState::Response(true) => {
             nav.replace(Route::Contacts { credentials });
             rsx! { h3 { "Loading resources" } }
         }
-        AuthenticationState::InvalidCredentials => {
+        PacketState::Response(false) => {
             nav.replace(Route::LoginAccount {});
             rsx! { h3 { "Invalid credentials" } }
         }
-        AuthenticationState::Waiting => {
+        PacketState::Waiting => {
             rsx! { h3 { "Checking credentials" } }
         }
-        AuthenticationState::ServerError => {
-            rsx! { h3 { "Server error" } }
+        PacketState::ServerError(err) => {
+            rsx! { h3 { "Server error: {err:?}" } }
+        }
+        PacketState::RequestTimeout => {
+            rsx! { h3 { "Request timeout" } }
         }
     };
     rsx! {

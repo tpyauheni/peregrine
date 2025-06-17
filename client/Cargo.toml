@@ -4,8 +4,10 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
+dioxus = { workspace = true }
 server = { workspace = true }
 platform-dirs = "0.3.0"
 serde = "1.0"
 postcard = { version = "1.1", features = ["use-std"] }
 atomic-write-file = "0.2"
+tokio = { version = "1.45", features = ["time"] }

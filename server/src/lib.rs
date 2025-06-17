@@ -15,7 +15,7 @@ use shared::limits::LIMITS;
 #[cfg(feature = "server")]
 use crate::secret::db::DB;
 
-#[derive(Debug, PartialEq)]
+#[derive(Debug, PartialEq, Clone, Copy)]
 pub enum ServerError {
     CreateAccountDatabaseError,
     CreateSessionDatabaseError,
