@@ -181,7 +181,9 @@ pub fn RegisterAccount() -> Element {
         };
         STORAGE.store_session_credentials(login_credentials);
         let nav = navigator();
-        nav.replace(Route::Contacts { credentials: login_credentials });
+        nav.replace(Route::Contacts {
+            credentials: login_credentials,
+        });
         info!("Form submitted, session token: {session_token:?}");
     }
 

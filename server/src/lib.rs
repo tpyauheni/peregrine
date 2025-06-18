@@ -7,7 +7,7 @@ use base64::{Engine, prelude::BASE64_URL_SAFE_NO_PAD};
 use chrono::{DateTime, TimeDelta, Utc};
 #[cfg(feature = "server")]
 use dioxus::logger::tracing::{debug, error, info};
-use dioxus::prelude::{server_fn::ServerFn, *};
+use dioxus::prelude::*;
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "server")]
 use shared::limits::LIMITS;
@@ -38,6 +38,7 @@ pub enum ServerError {
     UnsupportedCryptographicAlgorithm,
     AccountNotFound,
     LoginAccountDatabaseError,
+    GetUserDataDatabaseError,
 }
 
 impl FromStr for ServerError {
@@ -65,6 +66,7 @@ impl FromStr for ServerError {
             "UnsupportedCryptographicAlgorithm" => Ok(Self::UnsupportedCryptographicAlgorithm),
             "AccountNotFound" => Ok(Self::AccountNotFound),
             "LoginAccountDatabaseError" => Ok(Self::LoginAccountDatabaseError),
+            "GetUserDataDatabaseError" => Ok(Self::GetUserDataDatabaseError),
             _ => {
                 let Some(s_split) = s.split_once(':') else {
                     return Err(());
@@ -103,19 +105,30 @@ impl Display for ServerError {
             Self::SignatureEarly => "SignatureEarly".to_owned(),
             Self::SignatureExpired => "SignatureExpired".to_owned(),
             Self::InvalidSignature => "InvalidSignature".to_owned(),
-            Self::UnsupportedCryptographicAlgorithm => "UnsupportedCryptographicAlgorithm".to_owned(),
+            Self::UnsupportedCryptographicAlgorithm => {
+                "UnsupportedCryptographicAlgorithm".to_owned()
+            }
             Self::AccountNotFound => "AccountNotFound".to_owned(),
             Self::LoginAccountDatabaseError => "LoginAccountDatabaseError".to_owned(),
+            Self::GetUserDataDatabaseError => "GetUserDataDatabaseError".to_owned(),
         })?;
         Ok(())
     }
 }
 
+#[cfg(feature = "server")]
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Account {
     pub id: u64,
     pub public_key: Box<[u8]>,
     pub encrypted_private_info: Box<[u8]>,
+    pub email: Option<String>,
+    pub username: Option<String>,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct UserAccount {
+    pub public_key: Box<[u8]>,
     pub email: Option<String>,
     pub username: Option<String>,
 }
@@ -264,47 +277,79 @@ pub async fn login_account(
         || session_params.authorize_after_seconds >= LIMITS.max_session_after_period
         || session_params.session_validity_seconds >= LIMITS.max_session_validity_period
     {
-        return Err(ServerFnError::WrappedServerError(ServerError::LimitExceeded));
+        return Err(ServerFnError::WrappedServerError(
+            ServerError::LimitExceeded,
+        ));
     }
     let current_time = Utc::now();
-    let Some(expiration_seconds) = TimeDelta::try_seconds(session_params.session_validity_seconds as i64) else {
-        return Err(ServerFnError::WrappedServerError(ServerError::LimitExceeded));
+    let Some(expiration_seconds) =
+        TimeDelta::try_seconds(session_params.session_validity_seconds as i64)
+    else {
+        return Err(ServerFnError::WrappedServerError(
+            ServerError::LimitExceeded,
+        ));
     };
     let Some(expiration_time) = current_time.checked_add_signed(expiration_seconds) else {
-        return Err(ServerFnError::WrappedServerError(ServerError::LimitExceeded));
+        return Err(ServerFnError::WrappedServerError(
+            ServerError::LimitExceeded,
+        ));
     };
-    let unix_secs_now = current_time.signed_duration_since(DateTime::UNIX_EPOCH).num_seconds().cast_unsigned();
+    let unix_secs_now = current_time
+        .signed_duration_since(DateTime::UNIX_EPOCH)
+        .num_seconds()
+        .cast_unsigned();
 
-    if unix_secs_now < session_params.current_timestamp - session_params.authorize_before_seconds as u64 {
-        return Err(ServerFnError::WrappedServerError(ServerError::SignatureEarly))
+    if unix_secs_now
+        < session_params.current_timestamp - session_params.authorize_before_seconds as u64
+    {
+        return Err(ServerFnError::WrappedServerError(
+            ServerError::SignatureEarly,
+        ));
     }
-    if unix_secs_now > session_params.current_timestamp + session_params.authorize_after_seconds as u64 {
-        return Err(ServerFnError::WrappedServerError(ServerError::SignatureExpired))
+    if unix_secs_now
+        > session_params.current_timestamp + session_params.authorize_after_seconds as u64
+    {
+        return Err(ServerFnError::WrappedServerError(
+            ServerError::SignatureExpired,
+        ));
     }
 
     let data = &session_params.to_boxed_slice();
 
-    let Some(result) = shared::crypto::verify(&login_algorithm, &public_key, data, &signature) else {
-        return Err(ServerFnError::WrappedServerError(ServerError::UnsupportedCryptographicAlgorithm));
+    let Some(result) = shared::crypto::verify(&login_algorithm, &public_key, data, &signature)
+    else {
+        return Err(ServerFnError::WrappedServerError(
+            ServerError::UnsupportedCryptographicAlgorithm,
+        ));
     };
 
     if !result {
-        return Err(ServerFnError::WrappedServerError(ServerError::InvalidSignature));
+        return Err(ServerFnError::WrappedServerError(
+            ServerError::InvalidSignature,
+        ));
     }
 
     match DB.has_user_pubkey(id, &public_key) {
         Ok(result) => {
             if !result {
-                return Err(ServerFnError::WrappedServerError(ServerError::AccountNotFound));
+                return Err(ServerFnError::WrappedServerError(
+                    ServerError::AccountNotFound,
+                ));
             }
         }
         Err(err) => {
             error!("Failed to check if user has pubkey while loggin into account: {err:?}");
-            return Err(ServerFnError::WrappedServerError(ServerError::LoginAccountDatabaseError));
+            return Err(ServerFnError::WrappedServerError(
+                ServerError::LoginAccountDatabaseError,
+            ));
         }
     }
 
-    match DB.create_session(id, Some(current_time.naive_utc()), Some(expiration_time.naive_utc())) {
+    match DB.create_session(
+        id,
+        Some(current_time.naive_utc()),
+        Some(expiration_time.naive_utc()),
+    ) {
         Ok(session_id) => {
             debug!("New session created: {session_id:?}");
             Ok(session_id)
@@ -340,7 +385,9 @@ fn check_session(credentials: AccountCredentials) -> Result<(), ServerFnError<Se
 }
 
 #[server]
-pub async fn are_session_credentials_valid(credentials: AccountCredentials) -> Result<bool, ServerFnError<ServerError>> {
+pub async fn are_session_credentials_valid(
+    credentials: AccountCredentials,
+) -> Result<bool, ServerFnError<ServerError>> {
     match check_session(credentials) {
         Ok(()) => Ok(true),
         Err(err) => {
@@ -529,7 +576,8 @@ pub async fn accept_dm_invite(
         return Err(ServerFnError::WrappedServerError(ServerError::Forbidden));
     }
 
-    let group_id = match DB.create_dm_group(credentials.id, invite.other_id, invite.encrypted) {
+    let group_id = match DB.create_dm_group(invite.initiator_id, invite.other_id, invite.encrypted)
+    {
         Ok(id) => id,
         Err(err) => {
             error!("Failed to create DM group while trying to accept invite: {err:?}");
@@ -662,6 +710,29 @@ pub async fn leave_dm_group(
             error!("Failed to leave DM group: {err:?}");
             Err(ServerFnError::WrappedServerError(
                 ServerError::GroupDatabaseError,
+            ))
+        }
+    }
+}
+
+#[server]
+pub async fn get_user_data(
+    user_id: u64,
+    credentials: AccountCredentials,
+) -> Result<Option<UserAccount>, ServerFnError<ServerError>> {
+    check_session(credentials)?;
+
+    match DB.get_user_by_id(user_id) {
+        Ok(Some(account)) => Ok(Some(UserAccount {
+            public_key: account.public_key,
+            email: account.email,
+            username: account.username,
+        })),
+        Ok(None) => Ok(None),
+        Err(err) => {
+            eprintln!("Failed to get user by id {user_id}: {err:?}");
+            Err(ServerFnError::WrappedServerError(
+                ServerError::GetUserDataDatabaseError,
             ))
         }
     }

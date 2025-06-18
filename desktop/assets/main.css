@@ -147,3 +147,23 @@ a:focus {
 .twopanel-right {
     background-color: #161b1f;
 }
+
+.item-panel {
+    background-color: #191f23;
+    overflow: auto;
+    cursor: pointer;
+    max-width: 100%;
+    max-height: 70px;
+    padding: 16px;
+    padding-top: 12px;
+    padding-bottom: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+}
+.item-panel:hover {
+    background-color: #1b2227;
+}
+.item-panel:focus {
+    background-color: #1f262a;
+}

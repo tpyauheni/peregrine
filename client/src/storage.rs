@@ -1,9 +1,16 @@
-use std::{error::Error, fmt::Debug, fs::{self, File}, io::{self, Read, Write}, path::{Path, PathBuf}, sync::LazyLock};
+use std::{
+    error::Error,
+    fmt::Debug,
+    fs::{self, File},
+    io::{Read, Write},
+    path::{Path, PathBuf},
+    sync::LazyLock,
+};
 
 use atomic_write_file::AtomicWriteFile;
 use platform_dirs::AppDirs;
 use postcard::{from_bytes, to_allocvec};
-use serde::{de::DeserializeOwned, Deserialize, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 use server::AccountCredentials;
 
 pub static FALLBACK_DATA_PATH: LazyLock<PathBuf> = LazyLock::new(|| {
@@ -18,10 +25,8 @@ pub struct Storage {
 
 impl Default for Storage {
     fn default() -> Self {
-        let data_dir = AppDirs::new(Some("peregrine"), false).map_or(
-            FALLBACK_DATA_PATH.to_path_buf(),
-            |dirs| dirs.data_dir,
-        );
+        let data_dir = AppDirs::new(Some("peregrine"), false)
+            .map_or(FALLBACK_DATA_PATH.to_path_buf(), |dirs| dirs.data_dir);
         Self {
             base_path: data_dir,
         }
@@ -57,22 +62,31 @@ impl Storage {
         Ok(path.canonicalize().unwrap_or(path))
     }
 
-    fn raw_store<P: AsRef<Path>>(&self, file_path: P, data: &impl Serialize) -> Result<(), Box<dyn Error>> {
+    fn raw_store<P: AsRef<Path>>(
+        &self,
+        file_path: P,
+        data: &impl Serialize,
+    ) -> Result<(), Box<dyn Error>> {
         let path = self.get_path(file_path)?;
         println!("Storing data to file {:?}", path.as_path());
         let bytes = to_allocvec(data)?;
-        let mut file = AtomicWriteFile::options()
-            .open(path)?;
+        let mut file = AtomicWriteFile::options().open(path)?;
         file.write_all(&bytes)?;
         file.commit()?;
         Ok(())
     }
 
-    fn raw_load<P: AsRef<Path>, T: DeserializeOwned>(&self, file_path: P) -> Result<T, Box<dyn Error>> {
+    fn raw_load<P: AsRef<Path>, T: DeserializeOwned>(
+        &self,
+        file_path: P,
+    ) -> Result<T, Box<dyn Error>> {
         let path = self.get_path(file_path)?;
         println!("Loading data from file {:?}", path.as_path());
         let mut bytes: Vec<u8> = vec![];
-        File::options().read(true).open(path)?.read_to_end(&mut bytes)?;
+        File::options()
+            .read(true)
+            .open(path)?
+            .read_to_end(&mut bytes)?;
         let data = from_bytes(&bytes)?;
         Ok(data)
     }
@@ -95,7 +109,9 @@ impl Storage {
         match self.raw_load(file_path) {
             Ok(data) => Some(data),
             Err(err) => {
-                eprintln!("Unexpected error while trying to load data from file {file_path:?}: {err:?}");
+                eprintln!(
+                    "Unexpected error while trying to load data from file {file_path:?}: {err:?}"
+                );
                 None
             }
         }

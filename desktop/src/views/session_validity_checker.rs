@@ -1,4 +1,4 @@
-use client::{future_retry_loop, packet_sender::{PacketSender, PacketState}};
+use client::{future_retry_loop, packet_sender::PacketState};
 use dioxus::prelude::*;
 use server::AccountCredentials;
 
@@ -25,6 +25,7 @@ pub fn SessionValidityChecker(credentials: AccountCredentials) -> Element {
         PacketState::RequestTimeout => {
             rsx! { h3 { "Request timeout" } }
         }
+        PacketState::NotStarted => unreachable!(),
     };
     rsx! {
         h1 { "Loading..." },

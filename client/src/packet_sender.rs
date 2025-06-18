@@ -1,6 +1,9 @@
 use std::time::Duration;
 
-use dioxus::{prelude::ServerFnError, signals::{Signal, Writable}};
+use dioxus::{
+    prelude::ServerFnError,
+    signals::{Signal, Writable},
+};
 use server::ServerError;
 
 #[derive(PartialEq)]
@@ -9,6 +12,7 @@ pub enum PacketState<T> {
     Waiting,
     ServerError(ServerFnError<ServerError>),
     RequestTimeout,
+    NotStarted,
 }
 
 impl<T: Clone> Clone for PacketState<T> {
@@ -18,6 +22,7 @@ impl<T: Clone> Clone for PacketState<T> {
             Self::Waiting => Self::Waiting,
             Self::ServerError(arg0) => Self::ServerError(arg0.clone()),
             Self::RequestTimeout => Self::RequestTimeout,
+            Self::NotStarted => Self::NotStarted,
         }
     }
 }
@@ -52,17 +57,16 @@ impl PacketSender {
             }
         };
         match value {
-            Ok(value) => {
-                PacketState::Response(value)
-            }
-            Err(err) => {
-                PacketState::ServerError(err)
-            }
+            Ok(value) => PacketState::Response(value),
+            Err(err) => PacketState::ServerError(err),
         }
     }
 
-    pub async fn retry_loop<T, F>(&mut self, mut func: impl FnMut() -> F, signal: &mut Signal<PacketState<T>>)
-    where
+    pub async fn retry_loop<T, F>(
+        &mut self,
+        mut func: impl FnMut() -> F,
+        signal: &mut Signal<PacketState<T>>,
+    ) where
         F: Future<Output = Result<T, ServerFnError<ServerError>>>,
     {
         let mut retry_after: bool = true;
@@ -82,16 +86,15 @@ impl PacketSender {
 
 #[macro_export]
 macro_rules! future_retry_loop {
-    ($future:expr) => {
-        {
-            let mut result = dioxus::prelude::use_signal(|| $crate::packet_sender::PacketState::Waiting);
-            dioxus::prelude::use_future(move || async move {
-                $crate::packet_sender::PacketSender::default()
-                    .retry_loop(|| $future, &mut result)
-                    .await;
-            });
-            let value = result.read();
-            value.clone()
-        }
-    };
+    ($future:expr) => {{
+        let mut result =
+            dioxus::prelude::use_signal(|| $crate::packet_sender::PacketState::Waiting);
+        dioxus::prelude::use_future(move || async move {
+            $crate::packet_sender::PacketSender::default()
+                .retry_loop(|| $future, &mut result)
+                .await;
+        });
+        let value = result.read();
+        value.clone()
+    }};
 }

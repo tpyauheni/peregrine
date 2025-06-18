@@ -80,15 +80,7 @@ pub fn User(account: FoundAccount, credentials: AccountCredentials) -> Element {
     let email = account.email.unwrap_or("Hidden email".to_owned());
     rsx! {
         div {
-            class: "panel-nonround",
-            max_width: "100%",
-            max_height: "48px",
-            padding: "16px",
-            padding_top: "12px",
-            padding_bottom: "12px",
-            display: "flex",
-            align_items: "center",
-            justify_content: "center",
+            class: "item-panel",
             onclick: move |_| async move {
                 match server::send_dm_invite(account.id, false, credentials).await {
                     Ok(invite_id) => {

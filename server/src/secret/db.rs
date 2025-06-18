@@ -161,12 +161,7 @@ impl Database {
                 IFNULL(?, CURRENT_TIMESTAMP()),
                 IFNULL(?, DATE_ADD(NOW(), INTERVAL 7 DAY))
             );",
-            (
-                account_id,
-                session_token,
-                begin_time,
-                end_time,
-            ),
+            (account_id, session_token, begin_time, end_time),
         )?;
         Ok(session_token)
     }
@@ -335,16 +330,17 @@ impl Database {
         let mut conn = self.pool.get_conn()?;
         let mut invite: Row = conn
             .exec_first(
-                r"SELECT * FROM `invites`
+                r"SELECT * FROM `dm_invites`
             WHERE `id` = ?;",
                 (id,),
             )?
             .unwrap();
+        let encrypted_bytes: Box<[u8]> = invite.take_opt(3).unwrap()?;
         Ok(DmInvite {
             id: invite.take_opt(0).unwrap()?,
             initiator_id: invite.take_opt(1).unwrap()?,
             other_id: invite.take_opt(2).unwrap()?,
-            encrypted: invite.take_opt(3).unwrap()?,
+            encrypted: encrypted_bytes[0] != 0,
         })
     }
 
@@ -429,9 +425,29 @@ impl Database {
             r"SELECT 1 FROM `accounts`
             WHERE `id` = ?
                 AND `public_key` = ?;",
-                (account_id, public_key),
-            )?;
+            (account_id, public_key),
+        )?;
         Ok(account.is_some())
+    }
+
+    pub fn get_user_by_id(&self, account_id: u64) -> DbResult<Option<Account>> {
+        let mut conn = self.pool.get_conn()?;
+        let Some(mut invite) = conn.exec_first(
+            r"SELECT * FROM `accounts`
+            WHERE `id` = ?;",
+            (account_id,),
+        )?
+        else {
+            return Ok(None);
+        };
+        let _: Row = invite;
+        Ok(Some(Account {
+            id: invite.take_opt(0).unwrap()?,
+            public_key: invite.take_opt(1).unwrap()?,
+            encrypted_private_info: invite.take_opt(2).unwrap()?,
+            email: invite.take_opt(3).unwrap()?,
+            username: invite.take_opt(4).unwrap()?,
+        }))
     }
 
     #[cfg(test)]
@@ -518,7 +534,9 @@ mod tests {
         assert!(DB.is_valid_user_id(2).unwrap());
         assert!(DB.is_valid_user_id(3).unwrap());
         assert!(!DB.is_valid_user_id(4).unwrap());
+        assert!(DB.get_user_by_id(4).unwrap().is_none());
         DB.create_account(&[4], &[], None, None).unwrap();
+        assert_eq!(DB.get_user_by_id(4).unwrap().unwrap().id, 4);
         assert!(!DB.is_valid_user_id(0).unwrap());
         assert!(DB.is_valid_user_id(1).unwrap());
         assert!(DB.is_valid_user_id(2).unwrap());

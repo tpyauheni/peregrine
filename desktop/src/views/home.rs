@@ -1,13 +1,12 @@
 use client::storage::STORAGE;
 use dioxus::prelude::*;
-use server::AccountCredentials;
 use ui::{Echo, Hero};
 
 use crate::Route;
 
 #[component]
 pub fn Home() -> Element {
-    let credentials = STORAGE.load_session_credentials(); 
+    let credentials = STORAGE.load_session_credentials();
 
     let nav = navigator();
 

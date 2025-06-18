@@ -1,7 +1,7 @@
 use dioxus::prelude::*;
 
 use server::AccountCredentials;
-use views::{Contacts, Home, LoginAccount, RegisterAccount, SessionValidityChecker, Invites};
+use views::{Contacts, Home, Invites, LoginAccount, RegisterAccount, SessionValidityChecker};
 
 mod views;
 
