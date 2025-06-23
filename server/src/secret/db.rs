@@ -1,4 +1,4 @@
-use crate::{Account, DmInvite, DmMessage};
+use crate::{Account, DmInvite, DmMessage, DmGroup};
 
 use std::sync::{Arc, LazyLock, Mutex};
 
@@ -450,8 +450,43 @@ impl Database {
         }))
     }
 
+    pub fn get_dm_groups(
+        &self,
+        account_id: u64,
+    ) -> DbResult<Vec<DmGroup>> {
+        let mut conn = self.pool.get_conn()?;
+        let value = conn.exec_map(
+            r"SELECT
+                `id`,
+                `encrypted`,
+                `initiator_id`,
+                `other_id`
+                FROM `dm_groups`
+                WHERE `initiator_id` = ?
+                    OR `other_id` = ?
+                ORDER BY `id` DESC
+                LIMIT 30;",
+            (account_id, account_id),
+            |(
+                id,
+                encrypted_bytes,
+                initiator_id,
+                other_id,
+            )| {
+                let _: Box<[u8]> = encrypted_bytes;
+                DmGroup {
+                    id,
+                    encrypted: encrypted_bytes[0] != 0,
+                    initiator_id,
+                    other_id,
+                }
+            },
+        )?;
+        Ok(value)
+    }
+
     #[cfg(test)]
-    pub fn reset(&self) -> DbResult<()> {
+    pub(crate) fn reset(&self) -> DbResult<()> {
         let mut conn = self.pool.get_conn()?;
         conn.query_drop("DROP TABLE IF EXISTS `accounts`;")?;
         conn.query_drop("DROP TABLE IF EXISTS `sessions`;")?;
@@ -659,7 +694,13 @@ mod tests {
         assert!(!DB.is_in_dm_group(1, 2).unwrap());
         assert!(!DB.is_in_dm_group(2, 2).unwrap());
         assert!(!DB.is_in_dm_group(3, 2).unwrap());
+        assert!(DB.get_dm_groups(1).unwrap().is_empty());
+        assert!(DB.get_dm_groups(2).unwrap().is_empty());
+        assert!(DB.get_dm_groups(3).unwrap().is_empty());
         let dm_group1 = DB.create_dm_group(1, 2, true).unwrap();
+        assert_eq!(DB.get_dm_groups(1).unwrap().len(), 1);
+        assert_eq!(DB.get_dm_groups(2).unwrap().len(), 1);
+        assert!(DB.get_dm_groups(3).unwrap().is_empty());
         assert!(DB.is_in_dm_group(1, 1).unwrap());
         assert!(DB.is_in_dm_group(2, 1).unwrap());
         assert!(!DB.is_in_dm_group(3, 1).unwrap());
@@ -694,7 +735,15 @@ mod tests {
         let dm_messages3 = DB.get_dm_messages(1, dm_group1, 2).unwrap();
         assert_eq!(dm_messages2[1], dm_messages3[0]);
         assert_eq!(dm_messages3.len(), 1);
+        assert_eq!(DB.get_dm_groups(1).unwrap().len(), 1);
+        assert_eq!(DB.get_dm_groups(2).unwrap().len(), 1);
+        assert!(DB.get_dm_groups(3).unwrap().is_empty());
+        assert!(DB.get_dm_groups(4).unwrap().is_empty());
         let dm_group2 = DB.create_dm_group(3, 2, true).unwrap();
+        assert_eq!(DB.get_dm_groups(1).unwrap().len(), 1);
+        assert_eq!(DB.get_dm_groups(2).unwrap().len(), 2);
+        assert_eq!(DB.get_dm_groups(3).unwrap().len(), 1);
+        assert!(DB.get_dm_groups(4).unwrap().is_empty());
         assert!(DB.is_in_dm_group(1, 1).unwrap());
         assert!(DB.is_in_dm_group(2, 1).unwrap());
         assert!(!DB.is_in_dm_group(3, 1).unwrap());

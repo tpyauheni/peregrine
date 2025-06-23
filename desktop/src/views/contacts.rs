@@ -1,11 +1,52 @@
+use std::rc::Rc;
+
+use client::{future_retry_loop, packet_sender::PacketState};
 use dioxus::{logger::tracing::error, prelude::*};
-use server::{AccountCredentials, FoundAccount};
+use server::{AccountCredentials, DmGroup, FoundAccount};
 
 use crate::Route;
 
 #[component]
 pub fn Contacts(credentials: AccountCredentials) -> Element {
-    let mut found_users: Signal<Vec<FoundAccount>> = use_signal(Vec::new);
+    let mut found_users: Signal<Option<Vec<FoundAccount>>> = use_signal(|| None);
+    let joined_dm_groups = future_retry_loop!(server::get_joined_dm_groups(credentials));
+    let selected_dm_group: Signal<Option<DmGroup>> = use_signal(|| None);
+    let item_list = if let Some(users) = found_users() {
+        if users.is_empty() {
+            rsx!(h3 { "No accounts are matching the search query" })
+        } else {
+            rsx! {
+                for user in users {
+                    User { key: user.id, account: user.clone(), credentials }
+                }
+            }
+        }
+    } else {
+        match joined_dm_groups {
+            PacketState::Response(dm_groups) => {
+                if dm_groups.is_empty() {
+                    rsx!(h3 { "You are not a member of any group or conversation" })
+                } else {
+                    rsx! {
+                        for group in dm_groups {
+                            DmGroupPanel { group, user_id: credentials.id, selected_dm_group }
+                        }
+                    }
+                }
+            }
+            PacketState::Waiting => {
+                rsx!(h3 { "Loading..." })
+            }
+            PacketState::ServerError(err) => {
+                rsx!(h3 { "Server error: {err:?}" })
+            }
+            PacketState::RequestTimeout => {
+                rsx!(h3 { "Request timeout" })
+            }
+            PacketState::NotStarted => unreachable!(),
+        }
+    };
+
     rsx! {
         div {
             class: "twopanel-container",
@@ -25,19 +66,22 @@ pub fn Contacts(credentials: AccountCredentials) -> Element {
                     placeholder: "Search",
                     oninput: move |event| async move {
                         let query = event.value();
-                        match server::find_user(query, credentials).await {
-                            Ok(data) => found_users.set(data),
-                            Err(err) => error!("Error while trying to find user: {err:?}"),
-                        };
+
+                        if query.is_empty() {
+                            found_users.set(None);
+                        } else {
+                            match server::find_user(query, credentials).await {
+                                Ok(data) => found_users.set(Some(data)),
+                                Err(err) => error!("Error while trying to find user: {err:?}"),
+                            };
+                        }
                     }
                 }
                 div {
                     margin_top: "8px",
                     class: "noselect",
 
-                    for user in found_users() {
-                        User { key: user.id, account: user.clone(), credentials }
-                    }
+                    {item_list}
                 }
                 div {
                     flex_grow: 1,
@@ -56,7 +100,7 @@ pub fn Contacts(credentials: AccountCredentials) -> Element {
             }
             div {
                 class: "twopanel twopanel-right",
-                h1 { "Panel 2" }
+                MessagesPanel { selected_dm_group, credentials }
             }
         }
     }
@@ -118,6 +162,179 @@ pub fn User(account: FoundAccount, credentials: AccountCredentials) -> Element {
                     margin: 0,
                     margin_top: "6px",
                     {email}
+                }
+            }
+        }
+    }
+}
+
+#[component]
+fn MessagesPanel(selected_dm_group: Signal<Option<DmGroup>>, credentials: AccountCredentials) -> Element {
+    let mut msg_input: Signal<Option<Rc<MountedData>>> = use_signal(|| None);
+    let mut message: Signal<String> = use_signal(String::new);
+
+    let Some(selected_dm_group) = *selected_dm_group.read() else {
+        return rsx!(h1 { "Select a group or a conversation from the menu to the left" });
+    };
+
+    // TODO: Store `last_received_message_id` and received messages in `Storage`.
+    let messages = match future_retry_loop!(server::fetch_new_dm_messages(selected_dm_group.id, 0, credentials)) {
+        PacketState::Response(messages) => {
+            rsx! {
+                for message in messages {
+                    h4 { {format!("Message {} with encryption method \"{}\": {:?}", message.id, message.encryption_method, message.content)} }
+                }
+            }
+        }
+        PacketState::Waiting => {
+            rsx!(h1 { "Loading messages..." })
+        }
+        PacketState::ServerError(err) => {
+            rsx!(h1 { "Server error: {err}" })
+        }
+        PacketState::RequestTimeout => {
+            rsx!(h1 { "Request timeout" })
+        }
+        PacketState::NotStarted => unreachable!(),
+    };
+
+    rsx! {
+        div {
+            display: "flex",
+            flex_direction: "column",
+            height: "100%",
+            max_height: "100vh",
+
+            div {
+                width: "100%",
+                max_width: "calc(100% - 32px)",
+                height: "80px",
+                padding: "16px",
+
+                h1 { {format!("Group {}", selected_dm_group.id)} }
+            }
+            div {
+                width: "100%",
+                height: "1px",
+                background_image: "linear-gradient(#2b2b2b00, #2b2b2bff, #2b2b2b00)",
+
+                br {}
+            }
+            div {
+                width: "100%",
+                max_width: "calc(100% - 32px)",
+                flex_grow: 1,
+                overflow: "auto",
+                padding: "16px",
+
+                // h3 { "Messages here:" }
+                // for i in 0..100 {
+                //     h4 { {format!("Message {i}!")} }
+                // }
+                {messages}
+            }
+            div {
+                width: "100%",
+                height: "1px",
+                background_image: "linear-gradient(#2b2b2b00, #2b2b2bff, #2b2b2b00)",
+
+                br {}
+            }
+            div {
+                width: "100%",
+                max_width: "calc(100% - 32px)",
+                height: "auto",
+                // height: "34px",
+                padding: "16px",
+                background_color: "#121519",
+                onclick: move |_| async move {
+                    let Some(msg_input) = msg_input.read().clone() else {
+                        return;
+                    };
+                    _ = msg_input.set_focus(true).await;
+                },
+
+                span {
+                    class: "imitate-input",
+                    role: "textbox",
+                    contenteditable: true,
+                    resize: "none",
+                    // value: "{message}",
+                    border: "none",
+                    background: "none",
+                    padding: 0,
+                    height: "auto",
+                    onmounted: move |cx| msg_input.set(Some(cx.data())),
+                    oninput: move |event| {
+                        message.set(event.value());
+                    },
+                    onkeydown: move |event| {
+                        if event.code() != Code::Enter || event.modifiers().shift() {
+                            return;
+                        }
+                        event.prevent_default();
+                        println!("Sending message: {:?}", *message.read());
+                    }
+                }
+            }
+        }
+    }
+}
+
+#[component]
+pub fn DmGroupPanel(group: DmGroup, user_id: u64, selected_dm_group: Signal<Option<DmGroup>>) -> Element {
+    const ICON_TRANSPARENT: Asset = asset!(
+        "/assets/icon_transparent.png",
+        ImageAssetOptions::new()
+            .with_size(ImageSize::Manual {
+                width: 97,
+                height: 111,
+            })
+            .with_format(ImageFormat::Avif)
+    );
+
+    // TODO: Store the title in `Storage` and then load it.
+    let title = group.id.to_string();
+    // TODO: Make `identify_user(id: u64)` function which will check for client-overriden (or at
+    // least cached) data in `Storage` and if it doesn't find it, it'll send a request to the
+    // server and store the result.
+    let subtitle = if group.initiator_id == user_id {
+        group.other_id
+    } else {
+        group.initiator_id
+    }.to_string();
+    rsx! {
+        div {
+            class: "item-panel",
+            onclick: move |_| async move {
+                selected_dm_group.set(Some(group));
+            },
+
+            div {
+                margin: "0",
+                flex: "0 3 48px",
+                max_height: "46px",
+
+                img {
+                    src: ICON_TRANSPARENT,
+                    margin_right: "24px",
+                    width: "46px",
+                    max_height: "46px",
+                }
+            }
+            div {
+                flex: "1 0 auto",
+
+                h3 {
+                    padding: 0,
+                    margin: 0,
+                    {title}
+                }
+                p {
+                    padding: 0,
+                    margin: 0,
+                    margin_top: "6px",
+                    {subtitle}
                 }
             }
         }

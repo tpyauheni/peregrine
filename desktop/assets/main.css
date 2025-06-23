@@ -52,7 +52,7 @@ body {
     height: 100%;
 }
 
-input {
+input, .imitate-input {
     background-color: #121519;
     border: 1px solid #3a3a3a;
     color: #ffffff;
@@ -67,14 +67,14 @@ input {
     /* padding-left: 0; */
     /* padding-right: 0; */
 }
-input:hover {
+input:hover, .imitate-input {
     border-color: #4a4a4a;
     background-color: #14171b;
 }
-input:focus {
+input:focus, .imitate-input {
     border-color: #5b5b5b;
 }
-input:disabled {
+input:disabled, .imitate-input {
     border-color: #818181;
     background-color: #373737;
 }

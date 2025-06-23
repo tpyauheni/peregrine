@@ -180,6 +180,14 @@ pub struct SessionParams {
     pub session_validity_seconds: u32,
 }
 
+#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+pub struct DmGroup {
+    pub id: u64,
+    pub encrypted: bool,
+    pub initiator_id: u64,
+    pub other_id: u64,
+}
+
 impl FromStr for AccountCredentials {
     type Err = usize;
 
@@ -426,6 +434,10 @@ pub async fn find_user(
     query: String,
     credentials: AccountCredentials,
 ) -> Result<Vec<FoundAccount>, ServerFnError<ServerError>> {
+    if query.is_empty() {
+        return Err(ServerFnError::WrappedServerError(ServerError::InvalidArgumentSize));
+    }
+
     if query.len() > LIMITS.max_email_length.max(LIMITS.max_username_length) {
         return Err(ServerFnError::WrappedServerError(
             ServerError::InvalidArgumentSize,
@@ -733,6 +745,23 @@ pub async fn get_user_data(
             eprintln!("Failed to get user by id {user_id}: {err:?}");
             Err(ServerFnError::WrappedServerError(
                 ServerError::GetUserDataDatabaseError,
+            ))
+        }
+    }
+}
+
+#[server]
+pub async fn get_joined_dm_groups(
+    credentials: AccountCredentials,
+) -> Result<Vec<DmGroup>, ServerFnError<ServerError>> {
+    check_session(credentials)?;
+
+    match DB.get_dm_groups(credentials.id) {
+        Ok(groups) => Ok(groups),
+        Err(err) => {
+            error!("Failed to get joined DM groups of user {}: {err:?}", credentials.id);
+            Err(ServerFnError::WrappedServerError(
+                    ServerError::GroupDatabaseError,
             ))
         }
     }
