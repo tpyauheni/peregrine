@@ -167,3 +167,22 @@ a:focus {
 .item-panel:focus {
     background-color: #1f262a;
 }
+
+.message {
+    display: inline-block;
+    border-radius: 16px 16px 16px 2px;
+    padding: 12px 20px;
+    font-size: 14px;
+    margin-bottom: 4px;
+    max-width: calc(max(200px, 40%));
+    word-wrap: break-word;
+    /* width: calc(min(500px, auto)); */
+}
+
+.msg-me {
+    background-color: #4e2b78;
+}
+
+.msg-other {
+    background-color: #21272a;
+}

@@ -1,10 +1,12 @@
+use crate::crypto::get_iv;
+
 use super::{
     AsymmetricCipher, AsymmetricCipherPrivate, AsymmetricCipherPublic, CryptographyAlgorithmSet,
     HashAlgorithm, KeyDerivationAlgorithm, RandomNumberGenerator, SymmetricCipher,
 };
 use bee2_rs::{
     bash_hash::Bash512,
-    belt::{BeltEncryptionAlgorithm, BeltKey256},
+    belt::{BeltDwp, BeltEncryptionAlgorithm, BeltKey256},
     bign::{BignKey, BignParameters, BignParametersConfiguration},
     brng::{Brng, CtrRng},
     errors::Bee2Result,
@@ -176,7 +178,13 @@ impl RandomNumberGenerator for CtrRng {
     }
 }
 
-pub type CryptoSet = CryptographyAlgorithmSet<CtrRng, Belt256, Bign, Pbkdf2, Bash512>;
+pub type DefaultRng = CtrRng;
+
+pub(crate) fn rng() -> DefaultRng {
+    CtrRng::new(get_iv(), None)
+}
+
+pub type CryptoSet = CryptographyAlgorithmSet<DefaultRng, Belt256, Bign, Pbkdf2, Bash512>;
 
 pub(crate) fn cryptoset(password: &[u8], iv: [u8; 32]) -> CryptoSet {
     let mut kdf = Pbkdf2 {};
@@ -189,11 +197,69 @@ pub(crate) fn hash(data: &[u8]) -> Box<[u8]> {
     Bash512::hash(data).unwrap()
 }
 
+pub(crate) fn generate_keypair() -> (Box<[u8]>, Box<[u8]>) {
+    let key = BignKey::try_new(BignParameters::try_new(BignParametersConfiguration::B3).unwrap(), &mut rng()).unwrap();
+    (key.private_key, key.public_key)
+}
+
+pub(crate) fn sign(private_key: &[u8], public_key: &[u8], hash: &[u8]) -> Box<[u8]> {
+    let key = BignKey::try_load(BignParameters::try_new(BignParametersConfiguration::B3).unwrap(), public_key, private_key).unwrap();
+    key.sign(hash, &mut rng()).unwrap()
+}
+
 pub(crate) fn verify(public_key: &[u8], hash: &[u8], signature: &[u8]) -> bool {
-    let key = bee2_rs::bign::BignKey {
+    let key = BignKey {
         private_key: Box::new([]),
         public_key: Box::from(public_key),
         params: BignParameters::try_new(BignParametersConfiguration::B3).unwrap(),
     };
     key.verify(public_key, hash, signature).is_ok()
+}
+
+pub(crate) fn diffie_hellman(self_public_key: &[u8], self_private_key: &[u8], other_public_key: &[u8]) -> Box<[u8]> {
+    let mut key = BignKey::try_load(
+        BignParameters::try_new(BignParametersConfiguration::B3).unwrap(),
+        self_public_key,
+        self_private_key,
+    ).unwrap();
+    key.diffie_hellman(other_public_key, 32).unwrap()
+}
+
+// TODO: Add to upstream library.
+pub(crate) fn kdf(data: &[u8], result_len: usize) -> Box<[u8]> {
+    let mut result = vec![];
+
+    for _ in 0..=result_len / 32 {
+        let mut key = vec![0u8; 32];
+        let code = unsafe {
+            bee2_rs::bindings::bakeKDF(
+                key.as_mut_ptr(),
+                data.as_ptr(),
+                data.len(),
+                std::ptr::null(),
+                0,
+                0,
+            )
+        };
+        assert!(code == 0);
+        result.extend(key);
+    }
+
+    Box::from(&result[..result_len])
+}
+
+pub(crate) fn aead_wrap(plaintext: &[u8], key: &[u8], public_data: &[u8]) -> (Box<[u8]>, Box<[u8]>) {
+    let key = BeltKey256::new(key.try_into().unwrap());
+    let iv = key.clone().to_key128().get_bytes();
+    let (ciphertext, mac) = BeltDwp::wrap(plaintext, public_data, &key, *iv).unwrap();
+    (ciphertext, Box::from(mac))
+}
+
+pub(crate) fn aead_unwrap(ciphertext: &[u8], public_data: &[u8], mac: &[u8], key: &[u8]) -> Option<Box<[u8]>> {
+    let key = BeltKey256::new(key.try_into().unwrap());
+    let iv = key.clone().to_key128().get_bytes();
+    match BeltDwp::unwrap(ciphertext, public_data, mac.try_into().unwrap(), &key, *iv) {
+        Ok(data) => Some(data),
+        Err(_) => None,
+    }
 }

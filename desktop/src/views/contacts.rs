@@ -1,8 +1,8 @@
-use std::rc::Rc;
+use std::{rc::Rc, time::Duration};
 
-use client::{future_retry_loop, packet_sender::PacketState};
+use client::{future_retry_loop, packet_sender::{PacketSender, PacketState}};
 use dioxus::{logger::tracing::error, prelude::*};
-use server::{AccountCredentials, DmGroup, FoundAccount};
+use server::{AccountCredentials, DmGroup, DmMessage, FoundAccount};
 
 use crate::Route;
 
@@ -172,17 +172,28 @@ pub fn User(account: FoundAccount, credentials: AccountCredentials) -> Element {
 fn MessagesPanel(selected_dm_group: Signal<Option<DmGroup>>, credentials: AccountCredentials) -> Element {
     let mut msg_input: Signal<Option<Rc<MountedData>>> = use_signal(|| None);
     let mut message: Signal<String> = use_signal(String::new);
+    let mut sending_message: Signal<PacketState<u64>> = use_signal(|| PacketState::NotStarted);
 
     let Some(selected_dm_group) = *selected_dm_group.read() else {
         return rsx!(h1 { "Select a group or a conversation from the menu to the left" });
     };
 
+    future_retry_loop! { messages_signal, messages_resource, server::fetch_new_dm_messages(selected_dm_group.id, 0, credentials) };
+    use_future(move || async move {
+        loop {
+            tokio::time::sleep(Duration::from_secs(5)).await;
+            messages_resource.restart();
+        }
+    });
+
     // TODO: Store `last_received_message_id` and received messages in `Storage`.
-    let messages = match future_retry_loop!(server::fetch_new_dm_messages(selected_dm_group.id, 0, credentials)) {
-        PacketState::Response(messages) => {
+    let messages = match (*messages_signal.read()).clone() {
+        PacketState::Response(mut messages) => {
+            messages.reverse();
             rsx! {
                 for message in messages {
-                    h4 { {format!("Message {} with encryption method \"{}\": {:?}", message.id, message.encryption_method, message.content)} }
+                    DmMessageComponent { message }
+                    // h4 { {format!("Message {} with encryption method \"{}\": {:?}", message.id, message.encryption_method, message.content)} }
                 }
             }
         }
@@ -196,6 +207,20 @@ fn MessagesPanel(selected_dm_group: Signal<Option<DmGroup>>, credentials: Accoun
             rsx!(h1 { "Request timeout" })
         }
         PacketState::NotStarted => unreachable!(),
+    };
+    let sending_messages = match (*sending_message.read()).clone() {
+        PacketState::Response(_) | PacketState::NotStarted => {
+            rsx!()
+        }
+        PacketState::Waiting => {
+            rsx!(h4 { "Sending message..." })
+        }
+        PacketState::ServerError(err) => {
+            rsx!(h4 { "Error while trying to send a message: {err}" })
+        }
+        PacketState::RequestTimeout => {
+            rsx!(h4 { "Request timed out" })
+        }
     };
 
     rsx! {
@@ -232,6 +257,7 @@ fn MessagesPanel(selected_dm_group: Signal<Option<DmGroup>>, credentials: Accoun
                 //     h4 { {format!("Message {i}!")} }
                 // }
                 {messages}
+                {sending_messages}
             }
             div {
                 width: "100%",
@@ -254,12 +280,14 @@ fn MessagesPanel(selected_dm_group: Signal<Option<DmGroup>>, credentials: Accoun
                     _ = msg_input.set_focus(true).await;
                 },
 
-                span {
+                // TODO: Unset `contenteditable` and make text input work from keyboard using
+                // events.
+                textarea {
                     class: "imitate-input",
                     role: "textbox",
                     contenteditable: true,
                     resize: "none",
-                    // value: "{message}",
+                    value: "{message}",
                     border: "none",
                     background: "none",
                     padding: 0,
@@ -268,12 +296,30 @@ fn MessagesPanel(selected_dm_group: Signal<Option<DmGroup>>, credentials: Accoun
                     oninput: move |event| {
                         message.set(event.value());
                     },
-                    onkeydown: move |event| {
+                    onkeydown: move |event| async move {
                         if event.code() != Code::Enter || event.modifiers().shift() {
                             return;
                         }
                         event.prevent_default();
-                        println!("Sending message: {:?}", *message.read());
+                        // TODO: Encryption.
+                        let content = (*message.read()).clone();
+                        let msg_bytes: Box<[u8]> = Box::from(content.clone().as_bytes());
+                        println!("Send result: {:?}", server::send_dm_message(
+                            selected_dm_group.id,
+                            "plain".to_owned(),
+                            msg_bytes.clone(),
+                            credentials,
+                        ).await);
+                        // PacketSender::default()
+                        //     .retry_loop(move || server::send_dm_message(
+                        //         selected_dm_group.id,
+                        //         "plain".to_owned(),
+                        //         msg_bytes.clone(),
+                        //         credentials,
+                        //     ), &mut sending_message).await;
+                        println!("Sending message: {content:?}");
+                        message.set(String::new());
+                        messages_resource.restart();
                     }
                 }
             }
@@ -338,5 +384,21 @@ pub fn DmGroupPanel(group: DmGroup, user_id: u64, selected_dm_group: Signal<Opti
                 }
             }
         }
+    }
+}
+
+#[component]
+fn DmMessageComponent(message: DmMessage) -> Element {
+    rsx! {
+        div {
+            class: {format!("message {}", if message.sent_by_me {
+                "msg-me"
+            } else {
+                "msg-other"
+            })},
+
+            {String::from_utf8_lossy(&message.content)}
+        }
+        br {}
     }
 }

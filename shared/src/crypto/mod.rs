@@ -1,5 +1,6 @@
 #[cfg(feature = "bee2-rs")]
 pub mod bee2rs;
+pub mod x3dh;
 
 use std::fmt::Debug;
 
@@ -111,10 +112,39 @@ pub fn default_cryptoset(password: &[u8], iv: Option<[u8; 32]>) -> bee2rs::Crypt
 #[cfg(not(feature = "bee2-rs"))]
 compile_error!("No cryptography algorithm sets configured");
 
+#[cfg(feature = "bee2-rs")]
+pub fn default_rng() -> bee2rs::DefaultRng {
+    bee2rs::rng()
+}
+
 pub fn hash(alg_name: &str, data: &[u8]) -> Option<Box<[u8]>> {
     match alg_name {
         #[cfg(feature = "bee2-rs")]
         "bycrypto" => Some(bee2rs::hash(data)),
+        _ => None,
+    }
+}
+
+pub fn cryptosets() -> Vec<String> {
+    vec![
+        #[cfg(feature = "bee2-rs")]
+        "bycrypto".to_owned(),
+    ]
+}
+
+pub fn generate_keypair(alg_name: &str) -> Option<(Box<[u8]>, Box<[u8]>)> {
+    match alg_name {
+        #[cfg(feature = "bee2-rs")]
+        "bycrypto" => Some(bee2rs::generate_keypair()),
+        _ => None,
+    }
+}
+
+pub fn sign(alg_name: &str, private_key: &[u8], public_key: &[u8], data: &[u8]) -> Option<Box<[u8]>> {
+    let hash = hash("bycrypto", data)?;
+    match alg_name {
+        #[cfg(feature = "bee2-rs")]
+        "bycrypto" => Some(bee2rs::sign(private_key, public_key, &hash)),
         _ => None,
     }
 }
@@ -124,6 +154,38 @@ pub fn verify(alg_name: &str, public_key: &[u8], data: &[u8], signature: &[u8]) 
     match alg_name {
         #[cfg(feature = "bee2-rs")]
         "bycrypto" => Some(bee2rs::verify(public_key, &hash, signature)),
+        _ => None,
+    }
+}
+
+pub fn diffie_hellman(alg_name: &str, self_public_key: &[u8], self_private_key: &[u8], other_public_key: &[u8]) -> Option<Box<[u8]>> {
+    match alg_name {
+        #[cfg(feature = "bee2-rs")]
+        "bycrypto" => Some(bee2rs::diffie_hellman(self_public_key, self_private_key, other_public_key)),
+        _ => None,
+    }
+}
+
+pub fn kdf(alg_name: &str, data: &[u8], result_len: usize) -> Option<Box<[u8]>> {
+    match alg_name {
+        #[cfg(feature = "bee2-rs")]
+        "bycrypto" => Some(bee2rs::kdf(data, result_len)),
+        _ => None,
+    }
+}
+
+pub fn aead_wrap(alg_name: &str, plaintext: &[u8], key: &[u8], public_data: &[u8]) -> Option<(Box<[u8]>, Box<[u8]>)> {
+    match alg_name {
+        #[cfg(feature = "bee2-rs")]
+        "bycrypto" => Some(bee2rs::aead_wrap(plaintext, key, public_data)),
+        _ => None,
+    }
+}
+
+pub fn aead_unwrap(alg_name: &str, ciphertext: &[u8], public_data: &[u8], mac: &[u8], key: &[u8]) -> Option<Option<Box<[u8]>>> {
+    match alg_name {
+        #[cfg(feature = "bee2-rs")]
+        "bycrypto" => Some(bee2rs::aead_unwrap(ciphertext, public_data, mac, key)),
         _ => None,
     }
 }

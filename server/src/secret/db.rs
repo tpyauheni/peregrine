@@ -116,6 +116,15 @@ impl Database {
             );
         ",
         )?;
+        conn.query_drop(
+            r"
+            CREATE TABLE IF NOT EXISTS `group_invites` (
+                `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                `inviter_id` BIGINT NOT NULL,
+                `invited_id` BIGINT NOT NULL,
+            );
+        ",
+        )?;
         Ok(())
     }
 
@@ -483,6 +492,39 @@ impl Database {
             },
         )?;
         Ok(value)
+    }
+
+    pub fn create_group(
+        &self,
+        name: &str,
+        icon: &[u8],
+        encrypted: bool,
+        public: bool,
+        channel: bool,
+    ) -> DbResult<u64> {
+        let mut conn = self.pool.get_conn()?;
+        conn.exec_drop(
+            r"INSERT INTO `groups` (`name`, `icon`, `encrypted`, `public`, `channel`)
+                VALUES (?, ?, ?, ?, ?);",
+            (name, icon, encrypted, public, channel),
+        )?;
+        // `LAST_INSERT_ID()` returns the last id only for the current Pool connection.
+        let group_id: u64 = conn.query_first("SELECT LAST_INSERT_ID();")?.unwrap();
+        Ok(group_id)
+    }
+
+    pub fn is_in_group(&self, sender_id: u64, group_id: u64) -> DbResult<bool> {
+        let mut conn = self.pool.get_conn()?;
+        let value: Option<u8> = conn.exec_first(
+            r"SELECT 1 FROM `group_members`
+                WHERE `user_id` = :sender_id
+                    AND `group_id` = :group_id;",
+            params! {
+                group_id,
+                sender_id,
+            },
+        )?;
+        Ok(value.is_some())
     }
 
     #[cfg(test)]

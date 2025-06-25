@@ -337,8 +337,8 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 
 [[package]]
 name = "bee2-rs"
-version = "0.2.0"
-source = "git+ssh://git@github.com/tpyauheni/bee2-rs.git#be9af153e59e436c67ff7460eca2abca0fd7c9d1"
+version = "0.2.1"
+source = "git+ssh://git@github.com/tpyauheni/bee2-rs.git#8448ebc83a8076e77242a817b1680d4997d7da35"
 dependencies = [
  "bindgen",
  "cmake",
@@ -2970,7 +2970,7 @@ source = "registry+https://github.com/rust-lang/crates.io-index"
 checksum = "07033963ba89ebaf1584d767badaa2e8fcec21aedea6b8c0346d487d49c28667"
 dependencies = [
  "cfg-if",
- "windows-targets 0.53.2",
+ "windows-targets 0.48.5",
 ]
 
 [[package]]

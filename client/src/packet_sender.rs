@@ -97,4 +97,13 @@ macro_rules! future_retry_loop {
         let value = result.read();
         value.clone()
     }};
+    ($signal:ident, $resource:ident, $future:expr) => {
+        let mut $signal =
+            dioxus::prelude::use_signal(|| $crate::packet_sender::PacketState::Waiting);
+        let mut $resource = dioxus::prelude::use_resource(move || async move {
+            $crate::packet_sender::PacketSender::default()
+                .retry_loop(|| $future, &mut $signal)
+                .await;
+        });
+    };
 }
