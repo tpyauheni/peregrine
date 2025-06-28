@@ -1,0 +1,12 @@
+[application]
+name = "Peregrine"
+
+[bundle]
+identifier = "com.tpyauheni.peregrine"
+publisher = "NDTP"
+asset_dir = "desktop/assets"
+icon = [
+    "icons/icon.png",
+    "icons/icon.ico",
+]
+category = "SocialNetworking"

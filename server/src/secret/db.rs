@@ -1,4 +1,4 @@
-use crate::{Account, DmInvite, DmMessage, DmGroup};
+use crate::{Account, DmInvite, DmMessage, DmGroup, GroupMessage, GroupInvite, MultiUserGroup};
 
 use std::sync::{Arc, LazyLock, Mutex};
 
@@ -77,7 +77,7 @@ impl Database {
             CREATE TABLE IF NOT EXISTS `group_members` (
                 `group_id` BIGINT NOT NULL,
                 `user_id` BIGINT NOT NULL,
-                `permissions` VARCHAR(255) NOT NULL
+                `permissions` BLOB NOT NULL
             );
         ",
         )?;
@@ -122,6 +122,8 @@ impl Database {
                 `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
                 `inviter_id` BIGINT NOT NULL,
                 `invited_id` BIGINT NOT NULL,
+                `group_id` BIGINT NOT NULL,
+                `permissions` VARCHAR(255) NOT NULL
             );
         ",
         )?;
@@ -272,7 +274,7 @@ impl Database {
 
     pub fn get_dm_messages(
         &self,
-        first_message_id: u64,
+        last_message_id: u64,
         group_id: u64,
         account_id: u64,
     ) -> DbResult<Vec<DmMessage>> {
@@ -292,7 +294,7 @@ impl Database {
                     AND `is_dm` = 1
                 ORDER BY `send_time` DESC
                 LIMIT 30;",
-            (first_message_id, group_id),
+            (last_message_id, group_id),
             |(
                 id,
                 sender_id,
@@ -527,8 +529,252 @@ impl Database {
         Ok(value.is_some())
     }
 
-    #[cfg(test)]
-    pub(crate) fn reset(&self) -> DbResult<()> {
+    pub fn send_group_message(
+        &self,
+        sender_id: u64,
+        group_id: u64,
+        encryption_method: &str,
+        content: &[u8],
+        send_time: Option<chrono::NaiveDateTime>,
+    ) -> DbResult<u64> {
+        let mut conn = self.pool.get_conn()?;
+        conn.exec_drop(
+            r"INSERT INTO `messages` (
+                `group_id`,
+                `sender_id`,
+                `encryption_method`,
+                `reply_message_id`,
+                `edited_message_id`,
+                `content`,
+                `send_time`,
+                `is_dm`
+            ) VALUES (?, ?, ?, NULL, NULL, ?, IFNULL(?, CURRENT_TIMESTAMP()), 0)",
+            (group_id, sender_id, encryption_method, content, send_time),
+        )?;
+        Ok(conn.query_first("SELECT LAST_INSERT_ID();")?.unwrap())
+    }
+
+    pub fn get_group_messages(
+        &self,
+        last_message_id: u64,
+        group_id: u64,
+    ) -> DbResult<Vec<GroupMessage>> {
+        let mut conn = self.pool.get_conn()?;
+        let value = conn.exec_map(
+            r"SELECT
+                `id`,
+                `sender_id`,
+                `encryption_method`,
+                `reply_message_id`,
+                `edited_message_id`,
+                `content`,
+                `send_time`
+                FROM `messages`
+                WHERE `id` > ?
+                    AND `group_id` = ?
+                    AND `is_dm` = 0
+                ORDER BY `send_time` DESC
+                LIMIT 30;",
+            (last_message_id, group_id),
+            |(
+                id,
+                sender_id,
+                encryption_method,
+                reply_message_id,
+                edited_message_id,
+                content,
+                send_time,
+            )| {
+                let _: u64 = sender_id;
+                GroupMessage {
+                    id,
+                    sender_id,
+                    encryption_method,
+                    content,
+                    reply_to: reply_message_id,
+                    edit_for: edited_message_id,
+                    sent_time: send_time,
+                }
+            },
+        )?;
+        Ok(value)
+    }
+
+    pub fn add_group_invite(
+        &self,
+        inviter_id: u64,
+        invited_id: u64,
+        group_id: u64,
+        permissions: &[u8],
+    ) -> DbResult<u64> {
+        let mut conn = self.pool.get_conn()?;
+        conn.exec_drop(
+            r"INSERT INTO `group_invites` (
+            `inviter_id`,
+            `invited_id`,
+            `group_id`,
+            `permissions`
+        ) VALUES (?, ?, ?, ?);",
+            (inviter_id, invited_id, group_id, permissions),
+        )?;
+        Ok(conn.query_first("SELECT LAST_INSERT_ID();")?.unwrap())
+    }
+
+    pub fn get_group_invite(&self, id: u64) -> DbResult<GroupInvite> {
+        let mut conn = self.pool.get_conn()?;
+        let mut invite: Row = conn
+            .exec_first(
+                r"SELECT * FROM `group_invites`
+            WHERE `id` = ?;",
+                (id,),
+            )?
+            .unwrap();
+        Ok(GroupInvite {
+            id: invite.take_opt(0).unwrap()?,
+            inviter_id: invite.take_opt(1).unwrap()?,
+            invited_id: invite.take_opt(2).unwrap()?,
+            group_id: invite.take_opt(3).unwrap()?,
+            permissions: invite.take_opt(4).unwrap()?,
+        })
+    }
+
+    pub fn remove_group_invite(&self, id: u64) -> DbResult<()> {
+        let mut conn = self.pool.get_conn()?;
+        conn.exec_drop(
+            r"DELETE FROM `group_invites`
+            WHERE `id` = ?;",
+            (id,),
+        )?;
+        Ok(())
+    }
+
+    pub fn get_sent_group_invites(&self, id: u64) -> DbResult<Vec<GroupInvite>> {
+        let mut conn = self.pool.get_conn()?;
+        let value = conn.exec_map(
+            r"SELECT
+                *
+                FROM `group_invites`
+                WHERE `inviter_id` = ? 
+                ORDER BY `id` DESC
+                LIMIT 30;",
+            (id,),
+            |(id, inviter_id, invited_id, group_id, permissions)| {
+                GroupInvite {
+                    id,
+                    inviter_id,
+                    invited_id,
+                    group_id,
+                    permissions,
+                }
+            },
+        )?;
+        Ok(value)
+    }
+
+    pub fn get_received_group_invites(&self, id: u64) -> DbResult<Vec<GroupInvite>> {
+        let mut conn = self.pool.get_conn()?;
+        let value = conn.exec_map(
+            r"SELECT
+                *
+                FROM `group_invites`
+                WHERE `invited_id` = ? 
+                ORDER BY `id` DESC
+                LIMIT 30;",
+            (id,),
+            |(id, inviter_id, invited_id, group_id, permissions)| {
+                GroupInvite {
+                    id,
+                    inviter_id,
+                    invited_id,
+                    group_id,
+                    permissions,
+                }
+            },
+        )?;
+        Ok(value)
+    }
+
+    pub fn remove_group(&self, group_id: u64) -> DbResult<()> {
+        let mut conn = self.pool.get_conn()?;
+        Ok(conn.exec_drop(
+            r"DELETE FROM `groups`
+            WHERE id = ?",
+            (group_id,),
+        )?)
+    }
+
+    pub fn get_group_ids(
+        &self,
+        account_id: u64,
+    ) -> DbResult<Vec<u64>> {
+        let mut conn = self.pool.get_conn()?;
+        let group_ids: Vec<u64> = conn.exec_map(
+            r"SELECT
+                `group_id`
+                FROM `group_members`
+                WHERE `user_id` = ?
+                ORDER BY `group_id` DESC
+                LIMIT 30;",
+            (account_id,),
+            |group_id| {
+                group_id
+            },
+        )?;
+        Ok(group_ids)
+    }
+
+    pub fn get_group_by_id(
+        &self,
+        group_id: u64,
+    ) -> DbResult<MultiUserGroup> {
+        let mut conn = self.pool.get_conn()?;
+        let mut group = conn.exec_first(
+            r"SELECT
+                *
+                FROM `groups`
+                WHERE `id` = ?;",
+            (group_id,),
+        )?.unwrap();
+        let _: Row = group;
+        let encrypted_bytes: Box<[u8]> = group.take_opt(3).unwrap()?;
+        let public_bytes: Box<[u8]> = group.take_opt(4).unwrap()?;
+        let channel_bytes: Box<[u8]> = group.take_opt(5).unwrap()?;
+        Ok(MultiUserGroup {
+            id: group.take_opt(0).unwrap()?,
+            name: group.take_opt(1).unwrap()?,
+            icon: group.take_opt(2).unwrap()?,
+            encrypted: encrypted_bytes[0] != 0,
+            public: public_bytes[0] != 0,
+            channel: channel_bytes[0] != 0,
+        })
+    }
+
+    pub fn get_groups(&self, account_id: u64) -> DbResult<Vec<MultiUserGroup>> {
+        let group_ids = self.get_group_ids(account_id)?;
+        let mut groups = vec![];
+        groups.reserve_exact(group_ids.len());
+
+        for id in group_ids {
+            groups.push(self.get_group_by_id(id)?);
+        }
+
+        Ok(groups)
+    }
+
+    pub fn add_group_member(&self, group_id: u64, user_id: u64, permissions: &[u8]) -> DbResult<()> {
+        let mut conn = self.pool.get_conn()?;
+        conn.exec_drop(
+            r"INSERT INTO `group_members` (
+            `group_id`,
+            `user_id`,
+            `permissions`
+        ) VALUES (?, ?, ?);",
+            (group_id, user_id, permissions),
+        )?;
+        Ok(())
+    }
+
+    pub fn reset(&self) -> DbResult<()> {
         let mut conn = self.pool.get_conn()?;
         conn.query_drop("DROP TABLE IF EXISTS `accounts`;")?;
         conn.query_drop("DROP TABLE IF EXISTS `sessions`;")?;
@@ -538,6 +784,7 @@ impl Database {
         conn.query_drop("DROP TABLE IF EXISTS `messages`;")?;
         conn.query_drop("DROP TABLE IF EXISTS `read_messages`;")?;
         conn.query_drop("DROP TABLE IF EXISTS `dm_invites`;")?;
+        conn.query_drop("DROP TABLE IF EXISTS `group_invites`;")?;
         self.init()?;
         Ok(())
     }
@@ -565,7 +812,7 @@ pub mod rng {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{LazyLock, Once};
+    use std::sync::{LazyLock, Once, Mutex};
 
     use crate::{DmInvite, secret::db::Account};
 
@@ -574,231 +821,300 @@ mod tests {
     static DB: LazyLock<Database> =
         LazyLock::new(|| Database::new(&std::env::var("TEST_DB_URL").unwrap()));
     static INIT: Once = Once::new();
+    static DB_TEST_NUMBER: LazyLock<Mutex<usize>> = LazyLock::new(|| Mutex::new(0));
 
-    fn init() {
+    fn db_test(test_number: usize, test_fn: fn()) {
         INIT.call_once(|| {
             DB.reset().unwrap();
+        });
+        let mut test_lock;
+        loop {
+            test_lock = DB_TEST_NUMBER.lock().unwrap();
+            if *test_lock == test_number {
+                break;
+            }
+            drop(test_lock);
+        }
+        test_fn();
+        *test_lock = test_number + 1;
+    }
+
+    #[test]
+    fn create_accounts() {
+        db_test(0, || {
+            for id in 0..=6 {
+                assert!(!DB.is_valid_user_id(id).unwrap());
+            }
+            DB.create_account(
+                &[1],
+                &[],
+                Some("some_email@example.com"),
+                Some("The first User"),
+            )
+            .unwrap();
+            assert!(!DB.is_valid_user_id(0).unwrap());
+            assert!(DB.is_valid_user_id(1).unwrap());
+            assert!(!DB.is_valid_user_id(2).unwrap());
+            DB.create_account(&[2], &[], None, Some("The second user"))
+                .unwrap();
+            assert!(!DB.is_valid_user_id(0).unwrap());
+            assert!(DB.is_valid_user_id(1).unwrap());
+            assert!(DB.is_valid_user_id(2).unwrap());
+            assert!(!DB.is_valid_user_id(3).unwrap());
+            DB.create_account(&[3], &[], Some("third_user@example.com"), None)
+                .unwrap();
+            assert!(!DB.is_valid_user_id(0).unwrap());
+            assert!(DB.is_valid_user_id(1).unwrap());
+            assert!(DB.is_valid_user_id(2).unwrap());
+            assert!(DB.is_valid_user_id(3).unwrap());
+            assert!(!DB.is_valid_user_id(4).unwrap());
+            assert!(DB.get_user_by_id(4).unwrap().is_none());
+            DB.create_account(&[4], &[], None, None).unwrap();
+            assert_eq!(DB.get_user_by_id(4).unwrap().unwrap().id, 4);
+            assert!(!DB.is_valid_user_id(0).unwrap());
+            assert!(DB.is_valid_user_id(1).unwrap());
+            assert!(DB.is_valid_user_id(2).unwrap());
+            assert!(DB.is_valid_user_id(3).unwrap());
+            assert!(DB.is_valid_user_id(4).unwrap());
+            assert!(!DB.is_valid_user_id(5).unwrap());
+            DB.create_account(
+                &[5],
+                &[],
+                Some("different_account@example.com"),
+                Some("Account 5"),
+            )
+            .unwrap();
+            assert!(!DB.is_valid_user_id(0).unwrap());
+            assert!(DB.is_valid_user_id(1).unwrap());
+            assert!(DB.is_valid_user_id(2).unwrap());
+            assert!(DB.is_valid_user_id(3).unwrap());
+            assert!(DB.is_valid_user_id(4).unwrap());
+            assert!(DB.is_valid_user_id(5).unwrap());
+            assert!(!DB.is_valid_user_id(6).unwrap());
         });
     }
 
     #[test]
-    fn db_test_users() {
-        init();
+    fn test_find_accounts() {
+        db_test(1, || {
+            assert_eq!(
+                DB.find_user("user", 0).unwrap(),
+                vec![
+                    Account {
+                        id: 1,
+                        public_key: Box::new([1]),
+                        encrypted_private_info: Box::new([]),
+                        email: Some("some_email@example.com".to_owned()),
+                        username: Some("The first User".to_owned()),
+                    },
+                    Account {
+                        id: 2,
+                        public_key: Box::new([2]),
+                        encrypted_private_info: Box::new([]),
+                        email: None,
+                        username: Some("The second user".to_owned()),
+                    },
+                    Account {
+                        id: 3,
+                        public_key: Box::new([3]),
+                        encrypted_private_info: Box::new([]),
+                        email: Some("third_user@example.com".to_owned()),
+                        username: None,
+                    },
+                ],
+            );
+            assert_eq!(
+                DB.find_user("user", 2).unwrap(),
+                vec![
+                    Account {
+                        id: 1,
+                        public_key: Box::new([1]),
+                        encrypted_private_info: Box::new([]),
+                        email: Some("some_email@example.com".to_owned()),
+                        username: Some("The first User".to_owned()),
+                    },
+                    Account {
+                        id: 3,
+                        public_key: Box::new([3]),
+                        encrypted_private_info: Box::new([]),
+                        email: Some("third_user@example.com".to_owned()),
+                        username: None,
+                    },
+                ],
+            );
+        });
+    }
 
-        for id in 0..=6 {
-            assert!(!DB.is_valid_user_id(id).unwrap());
-        }
-        DB.create_account(
-            &[1],
-            &[],
-            Some("some_email@example.com"),
-            Some("The first User"),
-        )
-        .unwrap();
-        assert!(!DB.is_valid_user_id(0).unwrap());
-        assert!(DB.is_valid_user_id(1).unwrap());
-        assert!(!DB.is_valid_user_id(2).unwrap());
-        DB.create_account(&[2], &[], None, Some("The second user"))
-            .unwrap();
-        assert!(!DB.is_valid_user_id(0).unwrap());
-        assert!(DB.is_valid_user_id(1).unwrap());
-        assert!(DB.is_valid_user_id(2).unwrap());
-        assert!(!DB.is_valid_user_id(3).unwrap());
-        DB.create_account(&[3], &[], Some("third_user@example.com"), None)
-            .unwrap();
-        assert!(!DB.is_valid_user_id(0).unwrap());
-        assert!(DB.is_valid_user_id(1).unwrap());
-        assert!(DB.is_valid_user_id(2).unwrap());
-        assert!(DB.is_valid_user_id(3).unwrap());
-        assert!(!DB.is_valid_user_id(4).unwrap());
-        assert!(DB.get_user_by_id(4).unwrap().is_none());
-        DB.create_account(&[4], &[], None, None).unwrap();
-        assert_eq!(DB.get_user_by_id(4).unwrap().unwrap().id, 4);
-        assert!(!DB.is_valid_user_id(0).unwrap());
-        assert!(DB.is_valid_user_id(1).unwrap());
-        assert!(DB.is_valid_user_id(2).unwrap());
-        assert!(DB.is_valid_user_id(3).unwrap());
-        assert!(DB.is_valid_user_id(4).unwrap());
-        assert!(!DB.is_valid_user_id(5).unwrap());
-        DB.create_account(
-            &[5],
-            &[],
-            Some("different_account@example.com"),
-            Some("Account 5"),
-        )
-        .unwrap();
-        assert!(!DB.is_valid_user_id(0).unwrap());
-        assert!(DB.is_valid_user_id(1).unwrap());
-        assert!(DB.is_valid_user_id(2).unwrap());
-        assert!(DB.is_valid_user_id(3).unwrap());
-        assert!(DB.is_valid_user_id(4).unwrap());
-        assert!(DB.is_valid_user_id(5).unwrap());
-        assert!(!DB.is_valid_user_id(6).unwrap());
-        assert_eq!(
-            DB.find_user("user", 0).unwrap(),
-            vec![
-                Account {
-                    id: 1,
-                    public_key: Box::new([1]),
-                    encrypted_private_info: Box::new([]),
-                    email: Some("some_email@example.com".to_owned()),
-                    username: Some("The first User".to_owned()),
-                },
-                Account {
-                    id: 2,
-                    public_key: Box::new([2]),
-                    encrypted_private_info: Box::new([]),
-                    email: None,
-                    username: Some("The second user".to_owned()),
-                },
-                Account {
-                    id: 3,
-                    public_key: Box::new([3]),
-                    encrypted_private_info: Box::new([]),
-                    email: Some("third_user@example.com".to_owned()),
-                    username: None,
-                },
-            ],
-        );
-        assert_eq!(
-            DB.find_user("user", 2).unwrap(),
-            vec![
-                Account {
-                    id: 1,
-                    public_key: Box::new([1]),
-                    encrypted_private_info: Box::new([]),
-                    email: Some("some_email@example.com".to_owned()),
-                    username: Some("The first User".to_owned()),
-                },
-                Account {
-                    id: 3,
-                    public_key: Box::new([3]),
-                    encrypted_private_info: Box::new([]),
-                    email: Some("third_user@example.com".to_owned()),
-                    username: None,
-                },
-            ],
-        );
-        let token = DB.create_session(1, None, None).unwrap();
-        assert!(DB.is_session_valid(1, token).unwrap());
-        assert!(!DB.is_session_valid(2, token).unwrap());
-        assert!(!DB.is_session_valid(3, token).unwrap());
-        let token2 = DB.create_session(2, None, None).unwrap();
-        assert!(!DB.is_session_valid(1, token2).unwrap());
-        assert!(DB.is_session_valid(2, token2).unwrap());
-        assert!(!DB.is_session_valid(3, token2).unwrap());
-        let invite1 = DmInvite {
-            id: 1,
-            initiator_id: 1,
-            other_id: 2,
-            encrypted: false,
-        };
-        let invite2 = DmInvite {
-            id: 2,
-            initiator_id: 3,
-            other_id: 2,
-            encrypted: false,
-        };
-        let invite3 = DmInvite {
-            id: 3,
-            initiator_id: 3,
-            other_id: 1,
-            encrypted: false,
-        };
-        DB.add_dm_invite(invite1.initiator_id, invite1.other_id, invite1.encrypted)
-            .unwrap();
-        DB.add_dm_invite(invite2.initiator_id, invite2.other_id, invite2.encrypted)
-            .unwrap();
-        DB.add_dm_invite(invite3.initiator_id, invite3.other_id, invite3.encrypted)
-            .unwrap();
-        assert_eq!(DB.get_sent_dm_invites(1).unwrap(), vec![invite1]);
-        assert_eq!(DB.get_received_dm_invites(1).unwrap(), vec![invite3]);
-        assert_eq!(DB.get_sent_dm_invites(2).unwrap(), vec![]);
-        assert_eq!(
-            DB.get_received_dm_invites(2).unwrap(),
-            vec![invite2, invite1]
-        );
-        assert_eq!(DB.get_sent_dm_invites(3).unwrap(), vec![invite3, invite2]);
-        assert_eq!(DB.get_received_dm_invites(3).unwrap(), vec![]);
-        DB.remove_dm_invite(3).unwrap();
-        assert_eq!(DB.get_sent_dm_invites(1).unwrap(), vec![invite1]);
-        assert_eq!(DB.get_received_dm_invites(1).unwrap(), vec![]);
-        assert_eq!(DB.get_sent_dm_invites(2).unwrap(), vec![]);
-        assert_eq!(
-            DB.get_received_dm_invites(2).unwrap(),
-            vec![invite2, invite1]
-        );
-        assert_eq!(DB.get_sent_dm_invites(3).unwrap(), vec![invite2]);
-        assert_eq!(DB.get_received_dm_invites(3).unwrap(), vec![]);
-        assert!(!DB.is_in_dm_group(1, 1).unwrap());
-        assert!(!DB.is_in_dm_group(2, 1).unwrap());
-        assert!(!DB.is_in_dm_group(3, 1).unwrap());
-        assert!(!DB.is_in_dm_group(1, 2).unwrap());
-        assert!(!DB.is_in_dm_group(2, 2).unwrap());
-        assert!(!DB.is_in_dm_group(3, 2).unwrap());
-        assert!(DB.get_dm_groups(1).unwrap().is_empty());
-        assert!(DB.get_dm_groups(2).unwrap().is_empty());
-        assert!(DB.get_dm_groups(3).unwrap().is_empty());
-        let dm_group1 = DB.create_dm_group(1, 2, true).unwrap();
-        assert_eq!(DB.get_dm_groups(1).unwrap().len(), 1);
-        assert_eq!(DB.get_dm_groups(2).unwrap().len(), 1);
-        assert!(DB.get_dm_groups(3).unwrap().is_empty());
-        assert!(DB.is_in_dm_group(1, 1).unwrap());
-        assert!(DB.is_in_dm_group(2, 1).unwrap());
-        assert!(!DB.is_in_dm_group(3, 1).unwrap());
-        assert!(!DB.is_in_dm_group(1, 2).unwrap());
-        assert!(!DB.is_in_dm_group(2, 2).unwrap());
-        assert!(!DB.is_in_dm_group(3, 2).unwrap());
-        assert_eq!(dm_group1, 1);
-        DB.send_dm_message(1, dm_group1, "!plaintext", "Hello, World!".as_bytes(), None)
-            .unwrap();
-        DB.send_dm_message(2, dm_group1, "privatecipher123", &[0x69, 0x68], None)
-            .unwrap();
-        let dm_messages1 = DB.get_dm_messages(0, dm_group1, 1).unwrap();
-        assert_eq!(dm_messages1[0].id, 1);
-        assert_eq!(dm_messages1[0].encryption_method, "!plaintext");
-        assert_eq!(dm_messages1[0].content, "Hello, World!".as_bytes().into());
-        assert_eq!(dm_messages1[0].reply_to, None);
-        assert_eq!(dm_messages1[0].edit_for, None);
-        assert!(dm_messages1[0].sent_by_me);
-        assert_eq!(dm_messages1[1].id, 2);
-        assert_eq!(dm_messages1[1].encryption_method, "privatecipher123");
-        assert_eq!(dm_messages1[1].content, [0x69, 0x68].into());
-        assert_eq!(dm_messages1[1].reply_to, None);
-        assert_eq!(dm_messages1[1].edit_for, None);
-        assert!(!dm_messages1[1].sent_by_me);
-        assert_eq!(dm_messages1.len(), 2);
-        let mut dm_messages2 = DB.get_dm_messages(0, dm_group1, 2).unwrap();
-        dm_messages2[0].sent_by_me = !dm_messages2[0].sent_by_me;
-        dm_messages2[1].sent_by_me = !dm_messages2[1].sent_by_me;
-        assert_eq!(dm_messages1, dm_messages2);
-        dm_messages2[0].sent_by_me = !dm_messages2[0].sent_by_me;
-        dm_messages2[1].sent_by_me = !dm_messages2[1].sent_by_me;
-        let dm_messages3 = DB.get_dm_messages(1, dm_group1, 2).unwrap();
-        assert_eq!(dm_messages2[1], dm_messages3[0]);
-        assert_eq!(dm_messages3.len(), 1);
-        assert_eq!(DB.get_dm_groups(1).unwrap().len(), 1);
-        assert_eq!(DB.get_dm_groups(2).unwrap().len(), 1);
-        assert!(DB.get_dm_groups(3).unwrap().is_empty());
-        assert!(DB.get_dm_groups(4).unwrap().is_empty());
-        let dm_group2 = DB.create_dm_group(3, 2, true).unwrap();
-        assert_eq!(DB.get_dm_groups(1).unwrap().len(), 1);
-        assert_eq!(DB.get_dm_groups(2).unwrap().len(), 2);
-        assert_eq!(DB.get_dm_groups(3).unwrap().len(), 1);
-        assert!(DB.get_dm_groups(4).unwrap().is_empty());
-        assert!(DB.is_in_dm_group(1, 1).unwrap());
-        assert!(DB.is_in_dm_group(2, 1).unwrap());
-        assert!(!DB.is_in_dm_group(3, 1).unwrap());
-        assert!(!DB.is_in_dm_group(1, 2).unwrap());
-        assert!(DB.is_in_dm_group(2, 2).unwrap());
-        assert!(DB.is_in_dm_group(3, 2).unwrap());
-        DB.remove_dm_group(dm_group1).unwrap();
-        assert!(!DB.is_in_dm_group(1, 1).unwrap());
-        assert!(!DB.is_in_dm_group(2, 1).unwrap());
-        assert!(!DB.is_in_dm_group(3, 1).unwrap());
-        assert!(!DB.is_in_dm_group(1, 2).unwrap());
-        assert!(DB.is_in_dm_group(2, 2).unwrap());
-        assert!(DB.is_in_dm_group(3, 2).unwrap());
-        DB.remove_dm_group(dm_group2).unwrap();
+    #[test]
+    fn create_sessions() {
+        db_test(2, || {
+            let token = DB.create_session(1, None, None).unwrap();
+            assert!(DB.is_session_valid(1, token).unwrap());
+            assert!(!DB.is_session_valid(2, token).unwrap());
+            assert!(!DB.is_session_valid(3, token).unwrap());
+            let token2 = DB.create_session(2, None, None).unwrap();
+            assert!(!DB.is_session_valid(1, token2).unwrap());
+            assert!(DB.is_session_valid(2, token2).unwrap());
+            assert!(!DB.is_session_valid(3, token2).unwrap());
+        });
+    }
+
+    #[test]
+    fn test_invites() {
+        db_test(3, || {
+            let invite1 = DmInvite {
+                id: 1,
+                initiator_id: 1,
+                other_id: 2,
+                encrypted: false,
+            };
+            let invite2 = DmInvite {
+                id: 2,
+                initiator_id: 3,
+                other_id: 2,
+                encrypted: false,
+            };
+            let invite3 = DmInvite {
+                id: 3,
+                initiator_id: 3,
+                other_id: 1,
+                encrypted: false,
+            };
+            DB.add_dm_invite(invite1.initiator_id, invite1.other_id, invite1.encrypted)
+                .unwrap();
+            DB.add_dm_invite(invite2.initiator_id, invite2.other_id, invite2.encrypted)
+                .unwrap();
+            DB.add_dm_invite(invite3.initiator_id, invite3.other_id, invite3.encrypted)
+                .unwrap();
+            assert_eq!(DB.get_sent_dm_invites(1).unwrap(), vec![invite1]);
+            assert_eq!(DB.get_received_dm_invites(1).unwrap(), vec![invite3]);
+            assert_eq!(DB.get_sent_dm_invites(2).unwrap(), vec![]);
+            assert_eq!(
+                DB.get_received_dm_invites(2).unwrap(),
+                vec![invite2, invite1]
+            );
+            assert_eq!(DB.get_sent_dm_invites(3).unwrap(), vec![invite3, invite2]);
+            assert_eq!(DB.get_received_dm_invites(3).unwrap(), vec![]);
+            DB.remove_dm_invite(3).unwrap();
+            assert_eq!(DB.get_sent_dm_invites(1).unwrap(), vec![invite1]);
+            assert_eq!(DB.get_received_dm_invites(1).unwrap(), vec![]);
+            assert_eq!(DB.get_sent_dm_invites(2).unwrap(), vec![]);
+            assert_eq!(
+                DB.get_received_dm_invites(2).unwrap(),
+                vec![invite2, invite1]
+            );
+            assert_eq!(DB.get_sent_dm_invites(3).unwrap(), vec![invite2]);
+            assert_eq!(DB.get_received_dm_invites(3).unwrap(), vec![]);
+        });
+    }
+
+    #[test]
+    fn create_dm_groups() {
+        db_test(4, || {
+            assert!(!DB.is_in_dm_group(1, 1).unwrap());
+            assert!(!DB.is_in_dm_group(2, 1).unwrap());
+            assert!(!DB.is_in_dm_group(3, 1).unwrap());
+            assert!(!DB.is_in_dm_group(1, 2).unwrap());
+            assert!(!DB.is_in_dm_group(2, 2).unwrap());
+            assert!(!DB.is_in_dm_group(3, 2).unwrap());
+            assert!(DB.get_dm_groups(1).unwrap().is_empty());
+            assert!(DB.get_dm_groups(2).unwrap().is_empty());
+            assert!(DB.get_dm_groups(3).unwrap().is_empty());
+            let dm_group1 = DB.create_dm_group(1, 2, true).unwrap();
+            assert_eq!(DB.get_dm_groups(1).unwrap().len(), 1);
+            assert_eq!(DB.get_dm_groups(2).unwrap().len(), 1);
+            assert!(DB.get_dm_groups(3).unwrap().is_empty());
+            assert!(DB.is_in_dm_group(1, 1).unwrap());
+            assert!(DB.is_in_dm_group(2, 1).unwrap());
+            assert!(!DB.is_in_dm_group(3, 1).unwrap());
+            assert!(!DB.is_in_dm_group(1, 2).unwrap());
+            assert!(!DB.is_in_dm_group(2, 2).unwrap());
+            assert!(!DB.is_in_dm_group(3, 2).unwrap());
+            assert_eq!(dm_group1, 1);
+        });
+    }
+
+    #[test]
+    fn send_dm_messages() {
+        db_test(5, || {
+            let dm_group1 = 1;
+
+            DB.send_dm_message(1, dm_group1, "!plaintext", "Hello, World!".as_bytes(), None)
+                .unwrap();
+            DB.send_dm_message(2, dm_group1, "privatecipher123", &[0x69, 0x68], None)
+                .unwrap();
+            let dm_messages1 = DB.get_dm_messages(0, dm_group1, 1).unwrap();
+            assert_eq!(dm_messages1[0].id, 1);
+            assert_eq!(dm_messages1[0].encryption_method, "!plaintext");
+            assert_eq!(dm_messages1[0].content, "Hello, World!".as_bytes().into());
+            assert_eq!(dm_messages1[0].reply_to, None);
+            assert_eq!(dm_messages1[0].edit_for, None);
+            assert!(dm_messages1[0].sent_by_me);
+            assert_eq!(dm_messages1[1].id, 2);
+            assert_eq!(dm_messages1[1].encryption_method, "privatecipher123");
+            assert_eq!(dm_messages1[1].content, [0x69, 0x68].into());
+            assert_eq!(dm_messages1[1].reply_to, None);
+            assert_eq!(dm_messages1[1].edit_for, None);
+            assert!(!dm_messages1[1].sent_by_me);
+            assert_eq!(dm_messages1.len(), 2);
+            let mut dm_messages2 = DB.get_dm_messages(0, dm_group1, 2).unwrap();
+            dm_messages2[0].sent_by_me = !dm_messages2[0].sent_by_me;
+            dm_messages2[1].sent_by_me = !dm_messages2[1].sent_by_me;
+            assert_eq!(dm_messages1, dm_messages2);
+            dm_messages2[0].sent_by_me = !dm_messages2[0].sent_by_me;
+            dm_messages2[1].sent_by_me = !dm_messages2[1].sent_by_me;
+            let dm_messages3 = DB.get_dm_messages(1, dm_group1, 2).unwrap();
+            assert_eq!(dm_messages2[1], dm_messages3[0]);
+            assert_eq!(dm_messages3.len(), 1);
+        });
+    }
+
+    #[test]
+    fn test_dm_groups() {
+        db_test(6, || {
+            let dm_group1 = 1;
+
+            assert_eq!(DB.get_dm_groups(1).unwrap().len(), 1);
+            assert_eq!(DB.get_dm_groups(2).unwrap().len(), 1);
+            assert!(DB.get_dm_groups(3).unwrap().is_empty());
+            assert!(DB.get_dm_groups(4).unwrap().is_empty());
+            let dm_group2 = DB.create_dm_group(3, 2, true).unwrap();
+            assert_eq!(DB.get_dm_groups(1).unwrap().len(), 1);
+            assert_eq!(DB.get_dm_groups(2).unwrap().len(), 2);
+            assert_eq!(DB.get_dm_groups(3).unwrap().len(), 1);
+            assert!(DB.get_dm_groups(4).unwrap().is_empty());
+            assert!(DB.is_in_dm_group(1, 1).unwrap());
+            assert!(DB.is_in_dm_group(2, 1).unwrap());
+            assert!(!DB.is_in_dm_group(3, 1).unwrap());
+            assert!(!DB.is_in_dm_group(1, 2).unwrap());
+            assert!(DB.is_in_dm_group(2, 2).unwrap());
+            assert!(DB.is_in_dm_group(3, 2).unwrap());
+            DB.remove_dm_group(dm_group1).unwrap();
+            assert!(!DB.is_in_dm_group(1, 1).unwrap());
+            assert!(!DB.is_in_dm_group(2, 1).unwrap());
+            assert!(!DB.is_in_dm_group(3, 1).unwrap());
+            assert!(!DB.is_in_dm_group(1, 2).unwrap());
+            assert!(DB.is_in_dm_group(2, 2).unwrap());
+            assert!(DB.is_in_dm_group(3, 2).unwrap());
+            DB.remove_dm_group(dm_group2).unwrap();
+        });
+    }
+
+    #[test]
+    fn create_groups() {
+        db_test(7, || {
+            assert!(DB.get_groups(1).unwrap().is_empty());
+            assert!(DB.get_groups(2).unwrap().is_empty());
+            assert!(DB.get_groups(3).unwrap().is_empty());
+            assert!(DB.get_groups(4).unwrap().is_empty());
+            let group1 = DB.create_group("Some public group", &[], false, true, false).unwrap();
+            assert!(DB.get_groups(1).unwrap().is_empty());
+            assert_eq!(group1, 1);
+            DB.add_group_member(group1, 1, &[0xFF]).unwrap();
+            assert_eq!(DB.get_groups(1).unwrap().len(), 1);
+            assert!(DB.get_groups(2).unwrap().is_empty());
+            assert!(DB.get_groups(3).unwrap().is_empty());
+            assert!(DB.get_groups(4).unwrap().is_empty());
+        });
     }
 }

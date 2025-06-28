@@ -11,6 +11,7 @@ use dioxus::prelude::*;
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "server")]
 use shared::limits::LIMITS;
+use shared::types::GroupPermissions;
 
 #[cfg(feature = "server")]
 use crate::secret::db::DB;
@@ -39,6 +40,7 @@ pub enum ServerError {
     AccountNotFound,
     LoginAccountDatabaseError,
     GetUserDataDatabaseError,
+    AlreadyInGroup,
 }
 
 impl FromStr for ServerError {
@@ -67,6 +69,7 @@ impl FromStr for ServerError {
             "AccountNotFound" => Ok(Self::AccountNotFound),
             "LoginAccountDatabaseError" => Ok(Self::LoginAccountDatabaseError),
             "GetUserDataDatabaseError" => Ok(Self::GetUserDataDatabaseError),
+            "AlreadyInGroup" => Ok(Self::AlreadyInGroup),
             _ => {
                 let Some(s_split) = s.split_once(':') else {
                     return Err(());
@@ -111,6 +114,7 @@ impl Display for ServerError {
             Self::AccountNotFound => "AccountNotFound".to_owned(),
             Self::LoginAccountDatabaseError => "LoginAccountDatabaseError".to_owned(),
             Self::GetUserDataDatabaseError => "GetUserDataDatabaseError".to_owned(),
+            Self::AlreadyInGroup => "AlreadyInGroup".to_owned(),
         })?;
         Ok(())
     }
@@ -152,7 +156,18 @@ pub struct DmMessage {
     pub sent_by_me: bool,
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GroupMessage {
+    pub id: u64,
+    pub encryption_method: String,
+    pub content: Box<[u8]>,
+    pub reply_to: Option<u64>,
+    pub edit_for: Option<u64>,
+    pub sent_time: Option<chrono::NaiveDateTime>,
+    pub sender_id: u64,
+}
+
+#[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
 pub struct AccountCredentials {
     pub id: u64,
     pub session_token: [u8; 32],
@@ -164,6 +179,15 @@ pub struct DmInvite {
     pub initiator_id: u64,
     pub other_id: u64,
     pub encrypted: bool,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GroupInvite {
+    pub id: u64,
+    pub inviter_id: u64,
+    pub invited_id: u64,
+    pub group_id: u64,
+    pub permissions: Box<[u8]>,
 }
 
 /// Describes parameters of a requested session.
@@ -186,6 +210,16 @@ pub struct DmGroup {
     pub encrypted: bool,
     pub initiator_id: u64,
     pub other_id: u64,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct MultiUserGroup {
+    pub id: u64,
+    pub name: String,
+    pub icon: Box<[u8]>,
+    pub encrypted: bool,
+    pub public: bool,
+    pub channel: bool,
 }
 
 impl FromStr for AccountCredentials {
@@ -762,6 +796,164 @@ pub async fn get_joined_dm_groups(
             error!("Failed to get joined DM groups of user {}: {err:?}", credentials.id);
             Err(ServerFnError::WrappedServerError(
                     ServerError::GroupDatabaseError,
+            ))
+        }
+    }
+}
+
+#[server]
+pub async fn get_joined_groups(
+    credentials: AccountCredentials,
+) -> Result<Vec<MultiUserGroup>, ServerFnError<ServerError>> {
+    check_session(credentials)?;
+
+    match DB.get_groups(credentials.id) {
+        Ok(groups) => Ok(groups),
+        Err(err) => {
+            error!("Failed to get joined multi-user groups of user {}: {err:?}", credentials.id);
+            Err(ServerFnError::WrappedServerError(
+                    ServerError::GroupDatabaseError,
+            ))
+        }
+    }
+}
+
+#[cfg(feature = "server")]
+pub fn check_is_in_group(user_id: u64, group_id: u64) -> Result<(), ServerFnError<ServerError>> {
+    match DB.is_in_group(user_id, group_id) {
+        Ok(value) => {
+            if value {
+                Ok(())
+            } else {
+                Err(ServerFnError::WrappedServerError(ServerError::Forbidden))
+            }
+        }
+        Err(err) => {
+            error!("Failed to check whether the user is in group or not: {err:?}");
+            Err(ServerFnError::WrappedServerError(
+                ServerError::VerificationDatabaseError,
+            ))
+        }
+    }
+}
+
+#[cfg(feature = "server")]
+pub fn check_is_not_in_group(user_id: u64, group_id: u64) -> Result<(), ServerFnError<ServerError>> {
+    match DB.is_in_group(user_id, group_id) {
+        Ok(value) => {
+            if value {
+                Err(ServerFnError::WrappedServerError(ServerError::AlreadyInGroup))
+            } else {
+                Ok(())
+            }
+        }
+        Err(err) => {
+            error!("Failed to check whether the user is in group or not: {err:?}");
+            Err(ServerFnError::WrappedServerError(
+                ServerError::VerificationDatabaseError,
+            ))
+        }
+    }
+}
+
+#[server]
+pub async fn send_group_invite(
+    user_id: u64,
+    group_id: u64,
+    permissions: Box<[u8]>,
+    credentials: AccountCredentials,
+) -> Result<u64, ServerFnError<ServerError>> {
+    check_session(credentials)?;
+    check_is_in_group(credentials.id, group_id)?;
+    check_is_not_in_group(user_id, group_id)?;
+
+    match DB.add_group_invite(credentials.id, user_id, group_id, &permissions) {
+        Ok(invite_id) => Ok(invite_id),
+        Err(err) => {
+            error!("Failed to send group invite to user {user_id}: {err:?}");
+            Err(ServerFnError::WrappedServerError(
+                ServerError::GroupDatabaseError,
+            ))
+        }
+    }
+}
+
+#[server]
+pub async fn create_group(
+    name: String,
+    icon: Option<Box<[u8]>>,
+    encrypted: bool,
+    public: bool,
+    channel: bool,
+    credentials: AccountCredentials,
+) -> Result<u64, ServerFnError<ServerError>> {
+    check_session(credentials)?;
+
+    let group_id = match DB.create_group(&name, &icon.unwrap_or(Box::new([])), encrypted, public, channel) {
+        Ok(group_id) => group_id,
+        Err(err) => {
+            error!("Failed to create a new group: {err:?}");
+            return Err(ServerFnError::WrappedServerError(ServerError::GroupDatabaseError));
+        }
+    };
+
+    match DB.add_group_member(group_id, credentials.id, &GroupPermissions::admin().to_bytes()) {
+        Ok(()) => Ok(group_id),
+        Err(err) => {
+            error!("Failed to add user creator to its group: {err:?}");
+            Err(ServerFnError::WrappedServerError(ServerError::GroupPartiallyCreated(group_id)))
+        }
+    }
+}
+
+#[server]
+pub async fn fetch_new_group_messages(
+    group_id: u64,
+    last_received_message_id: u64,
+    credentials: AccountCredentials,
+) -> Result<Vec<GroupMessage>, ServerFnError<ServerError>> {
+    check_session(credentials)?;
+    check_is_in_group(credentials.id, group_id)?;
+
+    match DB.get_group_messages(last_received_message_id, group_id) {
+        Ok(messages) => Ok(messages),
+        Err(err) => {
+            error!("Failed to fetch new group messages: {err:?}");
+            Err(ServerFnError::WrappedServerError(
+                ServerError::FetchMessagesDatabaseError,
+            ))
+        }
+    }
+}
+
+#[server]
+pub async fn send_group_message(
+    group_id: u64,
+    encryption_method: String,
+    message: Box<[u8]>,
+    credentials: AccountCredentials,
+) -> Result<u64, ServerFnError<ServerError>> {
+    check_session(credentials)?;
+    check_is_in_group(credentials.id, group_id)?;
+
+    if encryption_method.len() > LIMITS.max_encryption_method_length {
+        return Err(ServerFnError::WrappedServerError(
+            ServerError::InvalidArgumentSize,
+        ));
+    }
+
+    if message.len() > LIMITS.max_message_length {
+        return Err(ServerFnError::WrappedServerError(
+            ServerError::InvalidArgumentSize,
+        ));
+    }
+
+    match DB.send_group_message(credentials.id, group_id, &encryption_method, &message, None) {
+        Ok(id) => Ok(id),
+        Err(err) => {
+            error!("Failed to send group message: {err:?}");
+            Err(ServerFnError::WrappedServerError(
+                ServerError::SendMessageDatabaseError,
             ))
         }
     }

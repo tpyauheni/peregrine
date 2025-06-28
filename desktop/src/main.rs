@@ -1,7 +1,7 @@
-use dioxus::prelude::*;
+use dioxus::{logger::tracing::Level, prelude::*};
 
 use server::AccountCredentials;
-use views::{Contacts, Home, Invites, LoginAccount, RegisterAccount, SessionValidityChecker};
+use views::{Contacts, Home, Invites, LoginAccount, RegisterAccount, SessionValidityChecker, OtherUserAccount, CreateGroup};
 
 mod views;
 
@@ -24,11 +24,23 @@ pub enum Route {
     SessionValidityChecker { credentials: AccountCredentials },
     #[route("/invites/:credentials")]
     Invites { credentials: AccountCredentials },
+    #[route("/user?:user_id&:credentials")]
+    OtherUserAccount { user_id: u64, credentials: AccountCredentials },
+    #[route("/create_group/:credentials")]
+    CreateGroup { credentials: AccountCredentials },
 }
 
 const MAIN_CSS: Asset = asset!("/assets/main.css");
 
 fn main() {
+    #[cfg(debug_assertions)]
+    {
+        dioxus::logger::init(Level::DEBUG).unwrap();
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        dioxus::logger::init(Level::INFO).unwrap();
+    }
     #[cfg(all(feature = "desktop", not(debug_assertions)))]
     {
         use dioxus::desktop::Config;

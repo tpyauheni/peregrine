@@ -1,5 +1,5 @@
-[build]
-target-dir = "../project/export/target"
+CC_x86_64-pc-windows-gnu = "/usr/bin/x86_64-w64-mingw32-gcc"
+CXX_x86_64-pc-windows-gnu = "/usr/bin/x86_64-w64-mingw32-g++"
 
 [target.x86_64-unknown-linux-gnu]
 linker = "clang"
@@ -8,3 +8,11 @@ rustflags = [
     "-Zshare-generics=y",
     "-Zthreads=0",
 ]
+
+[target.x86_64-pc-windows-gnu]
+# linker = "clang"
+linker = "/usr/bin/x86_64-w64-mingw32-gcc"
+# rustflags = [
+#     "-C",
+#     "link-args=-target x86_64-pc-windows-gnu -fuse-ld=lld",
+# ]
