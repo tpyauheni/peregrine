@@ -31,8 +31,10 @@ pub fn OtherUserAccount(user_id: u64, credentials: AccountCredentials) -> Elemen
         PacketState::Response(groups) => {
             rsx! {
                 for group in groups {
+                    br {}
                     button {
                         key: group.id,
+                        margin_top: "6px",
                         onclick: move |_| async move {
                             match server::send_group_invite(user_id, group.id, GroupPermissions::default().to_bytes(), credentials).await {
                                 Ok(invite_id) => {

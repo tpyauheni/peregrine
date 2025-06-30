@@ -65,6 +65,21 @@ pub fn Contacts(credentials: AccountCredentials) -> Element {
             PacketState::NotStarted => unreachable!(),
         }
     };
+    #[cfg(debug_assertions)]
+    let debug_only_components = rsx! {
+        div {
+            height: "30px",
+            a {
+                onclick: move |_| {
+                    let nav = navigator();
+                    nav.push(Route::ChangeCredentials { credentials });
+                },
+                "Change credentials (debug-only)"
+            }
+        }
+    };
+    #[cfg(not(debug_assertions))]
+    let debug_only_components = rsx!();
 
     rsx! {
         div {
@@ -106,6 +121,7 @@ pub fn Contacts(credentials: AccountCredentials) -> Element {
                     flex_grow: 1,
                     margin: 0,
                 }
+                {debug_only_components}
                 div {
                     height: "30px",
                     a {

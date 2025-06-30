@@ -53,7 +53,6 @@ impl Database {
             CREATE TABLE IF NOT EXISTS `groups` (
                 `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
                 `name` VARCHAR(255),
-                `icon` BLOB NOT NULL,
                 `encrypted` BIT NOT NULL,
                 `public` BIT NOT NULL,
                 `channel` BIT NOT NULL
@@ -443,7 +442,7 @@ impl Database {
 
     pub fn get_user_by_id(&self, account_id: u64) -> DbResult<Option<Account>> {
         let mut conn = self.pool.get_conn()?;
-        let Some(mut invite) = conn.exec_first(
+        let Some(mut user) = conn.exec_first(
             r"SELECT * FROM `accounts`
             WHERE `id` = ?;",
             (account_id,),
@@ -451,13 +450,13 @@ impl Database {
         else {
             return Ok(None);
         };
-        let _: Row = invite;
+        let _: Row = user;
         Ok(Some(Account {
-            id: invite.take_opt(0).unwrap()?,
-            public_key: invite.take_opt(1).unwrap()?,
-            encrypted_private_info: invite.take_opt(2).unwrap()?,
-            email: invite.take_opt(3).unwrap()?,
-            username: invite.take_opt(4).unwrap()?,
+            id: user.take_opt(0).unwrap()?,
+            public_key: user.take_opt(1).unwrap()?,
+            encrypted_private_info: user.take_opt(2).unwrap()?,
+            email: user.take_opt(3).unwrap()?,
+            username: user.take_opt(4).unwrap()?,
         }))
     }
 
@@ -499,16 +498,15 @@ impl Database {
     pub fn create_group(
         &self,
         name: &str,
-        icon: &[u8],
         encrypted: bool,
         public: bool,
         channel: bool,
     ) -> DbResult<u64> {
         let mut conn = self.pool.get_conn()?;
         conn.exec_drop(
-            r"INSERT INTO `groups` (`name`, `icon`, `encrypted`, `public`, `channel`)
-                VALUES (?, ?, ?, ?, ?);",
-            (name, icon, encrypted, public, channel),
+            r"INSERT INTO `groups` (`name`, `encrypted`, `public`, `channel`)
+                VALUES (?, ?, ?, ?);",
+            (name, encrypted, public, channel),
         )?;
         // `LAST_INSERT_ID()` returns the last id only for the current Pool connection.
         let group_id: u64 = conn.query_first("SELECT LAST_INSERT_ID();")?.unwrap();
@@ -726,27 +724,29 @@ impl Database {
     pub fn get_group_by_id(
         &self,
         group_id: u64,
-    ) -> DbResult<MultiUserGroup> {
+    ) -> DbResult<Option<MultiUserGroup>> {
         let mut conn = self.pool.get_conn()?;
-        let mut group = conn.exec_first(
+        let Some(mut group) = conn.exec_first(
             r"SELECT
                 *
                 FROM `groups`
                 WHERE `id` = ?;",
             (group_id,),
-        )?.unwrap();
+        )? else {
+            return Ok(None);
+        };
         let _: Row = group;
-        let encrypted_bytes: Box<[u8]> = group.take_opt(3).unwrap()?;
-        let public_bytes: Box<[u8]> = group.take_opt(4).unwrap()?;
-        let channel_bytes: Box<[u8]> = group.take_opt(5).unwrap()?;
-        Ok(MultiUserGroup {
+        let encrypted_bytes: Box<[u8]> = group.take_opt(2).unwrap()?;
+        let public_bytes: Box<[u8]> = group.take_opt(3).unwrap()?;
+        let channel_bytes: Box<[u8]> = group.take_opt(4).unwrap()?;
+        Ok(Some(MultiUserGroup {
             id: group.take_opt(0).unwrap()?,
             name: group.take_opt(1).unwrap()?,
-            icon: group.take_opt(2).unwrap()?,
+            icon: None,
             encrypted: encrypted_bytes[0] != 0,
             public: public_bytes[0] != 0,
             channel: channel_bytes[0] != 0,
-        })
+        }))
     }
 
     pub fn get_groups(&self, account_id: u64) -> DbResult<Vec<MultiUserGroup>> {
@@ -755,7 +755,9 @@ impl Database {
         groups.reserve_exact(group_ids.len());
 
         for id in group_ids {
-            groups.push(self.get_group_by_id(id)?);
+            if let Some(group) = self.get_group_by_id(id)? {
+                groups.push(group);
+            }
         }
 
         Ok(groups)
@@ -1107,7 +1109,7 @@ mod tests {
             assert!(DB.get_groups(2).unwrap().is_empty());
             assert!(DB.get_groups(3).unwrap().is_empty());
             assert!(DB.get_groups(4).unwrap().is_empty());
-            let group1 = DB.create_group("Some public group", &[], false, true, false).unwrap();
+            let group1 = DB.create_group("Some public group", false, true, false).unwrap();
             assert!(DB.get_groups(1).unwrap().is_empty());
             assert_eq!(group1, 1);
             DB.add_group_member(group1, 1, &[0xFF]).unwrap();

@@ -9,6 +9,8 @@ pub struct Limits {
 
     pub max_encryption_method_length: usize,
     pub max_message_length: usize,
+    pub max_user_icon_size: usize,
+    pub max_group_icon_size: usize,
 }
 
 pub static LIMITS: Limits = Limits {
@@ -21,4 +23,6 @@ pub static LIMITS: Limits = Limits {
 
     max_encryption_method_length: 16,
     max_message_length: 16 * 1024,
+    max_user_icon_size: 4 * 1024 * 1024,
+    max_group_icon_size: 4 * 1024 * 1024,
 };

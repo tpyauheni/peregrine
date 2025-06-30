@@ -7,3 +7,4 @@
 **/*.rs.bk
 
 env.sh
+/peregrine_server

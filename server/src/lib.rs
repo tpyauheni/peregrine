@@ -11,10 +11,14 @@ use dioxus::prelude::*;
 use serde::{Deserialize, Serialize};
 #[cfg(feature = "server")]
 use shared::limits::LIMITS;
-use shared::types::GroupPermissions;
+use shared::types::{GroupPermissions, UserIcon};
 
 #[cfg(feature = "server")]
 use crate::secret::db::DB;
+#[cfg(feature = "server")]
+use crate::secret::storage::STORAGE;
+#[cfg(feature = "server")]
+use shared::storage::{GeneralStorage, RawStorage};
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum ServerError {
@@ -41,6 +45,7 @@ pub enum ServerError {
     LoginAccountDatabaseError,
     GetUserDataDatabaseError,
     AlreadyInGroup,
+    GroupPartiallyJoined,
 }
 
 impl FromStr for ServerError {
@@ -70,6 +75,7 @@ impl FromStr for ServerError {
             "LoginAccountDatabaseError" => Ok(Self::LoginAccountDatabaseError),
             "GetUserDataDatabaseError" => Ok(Self::GetUserDataDatabaseError),
             "AlreadyInGroup" => Ok(Self::AlreadyInGroup),
+            "GroupPartiallyJoined" => Ok(Self::GroupPartiallyJoined),
             _ => {
                 let Some(s_split) = s.split_once(':') else {
                     return Err(());
@@ -115,6 +121,7 @@ impl Display for ServerError {
             Self::LoginAccountDatabaseError => "LoginAccountDatabaseError".to_owned(),
             Self::GetUserDataDatabaseError => "GetUserDataDatabaseError".to_owned(),
             Self::AlreadyInGroup => "AlreadyInGroup".to_owned(),
+            Self::GroupPartiallyJoined => "GroupPartiallyJoined".to_owned(),
         })?;
         Ok(())
     }
@@ -135,6 +142,7 @@ pub struct UserAccount {
     pub public_key: Box<[u8]>,
     pub email: Option<String>,
     pub username: Option<String>,
+    pub icon: UserIcon,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -216,7 +224,7 @@ pub struct DmGroup {
 pub struct MultiUserGroup {
     pub id: u64,
     pub name: String,
-    pub icon: Box<[u8]>,
+    pub icon: UserIcon,
     pub encrypted: bool,
     pub public: bool,
     pub channel: bool,
@@ -761,6 +769,16 @@ pub async fn leave_dm_group(
     }
 }
 
+#[cfg(feature = "server")]
+fn store_icon(prefix: &str, id: u64, icon: Box<[u8]>) {
+    STORAGE.store(&format!("{prefix}{id}.bin"), &icon);
+}
+
+#[cfg(feature = "server")]
+fn load_icon(prefix: &str, id: u64) -> UserIcon {
+    STORAGE.raw_load(format!("{prefix}{id}.bin")).ok()
+}
+
 #[server]
 pub async fn get_user_data(
     user_id: u64,
@@ -768,17 +786,52 @@ pub async fn get_user_data(
 ) -> Result<Option<UserAccount>, ServerFnError<ServerError>> {
     check_session(credentials)?;
 
+    let icon = load_icon("u", user_id);
+
     match DB.get_user_by_id(user_id) {
         Ok(Some(account)) => Ok(Some(UserAccount {
             public_key: account.public_key,
             email: account.email,
             username: account.username,
+            icon,
         })),
         Ok(None) => Ok(None),
         Err(err) => {
             eprintln!("Failed to get user by id {user_id}: {err:?}");
             Err(ServerFnError::WrappedServerError(
                 ServerError::GetUserDataDatabaseError,
+            ))
+        }
+    }
+}
+
+#[server]
+pub async fn get_group_data(
+    group_id: u64,
+    credentials: AccountCredentials,
+) -> Result<Option<MultiUserGroup>, ServerFnError<ServerError>> {
+    check_session(credentials)?;
+
+    let err = check_is_in_group(credentials.id, group_id);
+
+    match DB.get_group_by_id(group_id) {
+        Ok(Some(mut group)) => {
+            if let Err(err) = err && !group.public {
+                return Err(err);
+            }
+
+            let icon = load_icon("g", group_id);
+            group.icon = icon;
+
+            Ok(Some(group))
+        }
+        Ok(None) => {
+            Err(ServerFnError::WrappedServerError(ServerError::Forbidden))
+        }
+        Err(err) => {
+            eprintln!("Failed to get group data by id {group_id}: {err:?}");
+            Err(ServerFnError::WrappedServerError(
+                ServerError::GroupDatabaseError,
             ))
         }
     }
@@ -889,13 +942,21 @@ pub async fn create_group(
 ) -> Result<u64, ServerFnError<ServerError>> {
     check_session(credentials)?;
 
-    let group_id = match DB.create_group(&name, &icon.unwrap_or(Box::new([])), encrypted, public, channel) {
+    if let Some(icon) = icon.as_ref() && icon.len() > LIMITS.max_group_icon_size {
+        return Err(ServerFnError::WrappedServerError(ServerError::LimitExceeded));
+    }
+
+    let group_id = match DB.create_group(&name, encrypted, public, channel) {
         Ok(group_id) => group_id,
         Err(err) => {
             error!("Failed to create a new group: {err:?}");
             return Err(ServerFnError::WrappedServerError(ServerError::GroupDatabaseError));
         }
     };
+
+    if let Some(icon) = icon {
+        store_icon("g", group_id, icon);
+    }
 
     match DB.add_group_member(group_id, credentials.id, &GroupPermissions::admin().to_bytes()) {
         Ok(()) => Ok(group_id),
@@ -954,6 +1015,146 @@ pub async fn send_group_message(
             error!("Failed to send group message: {err:?}");
             Err(ServerFnError::WrappedServerError(
                 ServerError::SendMessageDatabaseError,
+            ))
+        }
+    }
+}
+
+#[server]
+pub async fn get_sent_group_invites(
+    credentials: AccountCredentials,
+) -> Result<Vec<GroupInvite>, ServerFnError<ServerError>> {
+    check_session(credentials)?;
+
+    match DB.get_sent_group_invites(credentials.id) {
+        Ok(invites) => Ok(invites),
+        Err(err) => {
+            error!("Failed to get sent group invites: {err:?}");
+            Err(ServerFnError::WrappedServerError(
+                ServerError::InviteDatabaseError,
+            ))
+        }
+    }
+}
+
+#[server]
+pub async fn get_received_group_invites(
+    credentials: AccountCredentials,
+) -> Result<Vec<GroupInvite>, ServerFnError<ServerError>> {
+    check_session(credentials)?;
+
+    match DB.get_received_group_invites(credentials.id) {
+        Ok(invites) => Ok(invites),
+        Err(err) => {
+            error!("Failed to get received group invites: {err:?}");
+            Err(ServerFnError::WrappedServerError(
+                ServerError::InviteDatabaseError,
+            ))
+        }
+    }
+}
+
+#[server]
+pub async fn cancel_group_invite(
+    invite_id: u64,
+    credentials: AccountCredentials,
+) -> Result<(), ServerFnError<ServerError>> {
+    check_session(credentials)?;
+
+    let invite = match DB.get_group_invite(invite_id) {
+        Ok(invite) => invite,
+        Err(err) => {
+            error!("Failed to get group invite while trying to reject: {err:?}");
+            return Err(ServerFnError::WrappedServerError(
+                ServerError::InviteDatabaseError,
+            ));
+        }
+    };
+
+    if invite.inviter_id != credentials.id {
+        return Err(ServerFnError::WrappedServerError(ServerError::Forbidden));
+    }
+
+    match DB.remove_group_invite(invite_id) {
+        Ok(()) => Ok(()),
+        Err(err) => {
+            error!("Failed to cancel group invite: {err:?}");
+            Err(ServerFnError::WrappedServerError(
+                ServerError::InviteDatabaseError,
+            ))
+        }
+    }
+}
+
+#[server]
+pub async fn accept_group_invite(
+    invite_id: u64,
+    credentials: AccountCredentials,
+) -> Result<(), ServerFnError<ServerError>> {
+    check_session(credentials)?;
+
+    let invite = match DB.get_group_invite(invite_id) {
+        Ok(invite) => invite,
+        Err(err) => {
+            error!("Failed to get group invite while trying to accept: {err:?}");
+            return Err(ServerFnError::WrappedServerError(
+                ServerError::InviteDatabaseError,
+            ));
+        }
+    };
+
+    if invite.invited_id != credentials.id {
+        return Err(ServerFnError::WrappedServerError(ServerError::Forbidden));
+    }
+
+    match DB.add_group_member(invite.group_id, invite.invited_id, &GroupPermissions::default().to_bytes()) {
+        Ok(id) => id,
+        Err(err) => {
+            error!("Failed to create group while trying to accept invite: {err:?}");
+            return Err(ServerFnError::WrappedServerError(
+                ServerError::InviteDatabaseError,
+            ));
+        }
+    };
+
+    match DB.remove_group_invite(invite_id) {
+        Ok(()) => Ok(()),
+        Err(err) => {
+            error!("Failed to accept group invite (after creating group): {err:?}");
+            Err(ServerFnError::WrappedServerError(
+                ServerError::GroupPartiallyJoined,
+            ))
+        }
+    }
+}
+
+#[server]
+pub async fn reject_group_invite(
+    invite_id: u64,
+    credentials: AccountCredentials,
+) -> Result<(), ServerFnError<ServerError>> {
+    check_session(credentials)?;
+
+    let invite = match DB.get_group_invite(invite_id) {
+        Ok(invite) => invite,
+        Err(err) => {
+            error!("Failed to get group invite while trying to reject: {err:?}");
+            return Err(ServerFnError::WrappedServerError(
+                ServerError::InviteDatabaseError,
+            ));
+        }
+    };
+
+    if invite.invited_id != credentials.id {
+        return Err(ServerFnError::WrappedServerError(ServerError::Forbidden));
+    }
+
+    match DB.remove_group_invite(invite_id) {
+        Ok(()) => Ok(()),
+        Err(err) => {
+            error!("Failed to reject group invite: {err:?}");
+            Err(ServerFnError::WrappedServerError(
+                ServerError::InviteDatabaseError,
             ))
         }
     }

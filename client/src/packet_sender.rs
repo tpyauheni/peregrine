@@ -94,7 +94,7 @@ macro_rules! future_retry_loop {
                 .retry_loop(|| $future, &mut result)
                 .await;
         });
-        let value = result.read();
+        let value = dioxus::prelude::Readable::read(&result);
         value.clone()
     }};
     ($signal:ident, $resource:ident, $future:expr) => {

@@ -52,3 +52,5 @@ impl GroupPermissions {
         }
     }
 }
+
+pub type UserIcon = Option<Box<[u8]>>;

@@ -2,6 +2,8 @@ use dioxus::{logger::tracing::Level, prelude::*};
 
 use server::AccountCredentials;
 use views::{Contacts, Home, Invites, LoginAccount, RegisterAccount, SessionValidityChecker, OtherUserAccount, CreateGroup};
+#[cfg(debug_assertions)]
+use views::ChangeCredentials;
 
 mod views;
 
@@ -28,6 +30,9 @@ pub enum Route {
     OtherUserAccount { user_id: u64, credentials: AccountCredentials },
     #[route("/create_group/:credentials")]
     CreateGroup { credentials: AccountCredentials },
+    #[cfg(debug_assertions)]
+    #[route("/debug/change_credentials/:credentials")]
+    ChangeCredentials { credentials: AccountCredentials },
 }
 
 const MAIN_CSS: Asset = asset!("/assets/main.css");

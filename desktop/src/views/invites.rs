@@ -1,10 +1,9 @@
 use client::{
-    future_retry_loop,
-    packet_sender::{PacketSender, PacketState},
+    cache::CACHE, future_retry_loop, packet_sender::{PacketSender, PacketState}
 };
 use dioxus::prelude::*;
-use dioxus_free_icons::icons::go_icons::{GoAlert, GoCircleSlash, GoLock, GoSync, GoUnlock};
-use server::{AccountCredentials, DmInvite};
+use dioxus_free_icons::icons::go_icons::{GoAlert, GoCircleSlash, GoLock, GoPeople, GoSync, GoUnlock};
+use server::{AccountCredentials, DmInvite, GroupInvite};
 
 #[derive(Clone, Copy)]
 enum Tab {
@@ -54,34 +53,46 @@ pub fn Invites(credentials: AccountCredentials) -> Element {
     }
 }
 
+#[derive(Clone, PartialEq)]
+enum Invite {
+    Conversation(DmInvite),
+    Group(GroupInvite),
+}
+
 #[component]
 pub fn SentInvitesTab(credentials: AccountCredentials) -> Element {
     // TODO: Add invite caching so "Loading invites..." won't be shown every time user switches
     // tab. But still make a request each time.
     // The following feature is being called every time the tab is switched on purpose.
     let sent_dm_invites = future_retry_loop!(server::get_sent_dm_invites(credentials));
-    let dm_invites = match sent_dm_invites {
-        PacketState::Response(invites) => {
-            rsx! {
-                for invite in invites {
-                    SentInvite { key: invite.id, invite, credentials }
+    let sent_group_invites = future_retry_loop!(server::get_sent_group_invites(credentials));
+    let invites = match sent_dm_invites {
+        PacketState::Response(dm_invites) => {
+            match sent_group_invites {
+                PacketState::Response(group_invites) => {
+                    rsx! {
+                        for invite in dm_invites {
+                            SentInvite { key: invite.id * 2, invite: Invite::Conversation(invite), credentials }
+                        }
+                        for invite in group_invites {
+                            SentInvite { key: invite.id * 2 + 1, invite: Invite::Group(invite), credentials }
+                        }
+                    }
                 }
+                PacketState::Waiting => rsx!(p { "Loading invites..." }),
+                PacketState::ServerError(err) => rsx!(p { "Server error: {err:?}" }),
+                PacketState::RequestTimeout => rsx!(p { "Request timeout" }),
+                PacketState::NotStarted => unreachable!(),
             }
         }
-        PacketState::Waiting => {
-            rsx!(p { "Loading invites..." })
-        }
-        PacketState::ServerError(err) => {
-            rsx! {p { "Server error: {err:?}" }}
-        }
-        PacketState::RequestTimeout => {
-            rsx!(p { "Request timeout" })
-        }
+        PacketState::Waiting => rsx!(p { "Loading invites..." }), 
+        PacketState::ServerError(err) => rsx!(p { "Server error: {err:?}" }),
+        PacketState::RequestTimeout => rsx!(p { "Request timeout" }),
         PacketState::NotStarted => unreachable!(),
     };
     rsx! {
         h3 { "Sent invites" }
-        {dm_invites}
+        {invites}
     }
 }
 
@@ -89,33 +100,39 @@ pub fn SentInvitesTab(credentials: AccountCredentials) -> Element {
 pub fn ReceivedInvitesTab(credentials: AccountCredentials) -> Element {
     // The following feature is being called every time the tab is switched on purpose.
     let received_dm_invites = future_retry_loop!(server::get_received_dm_invites(credentials));
-    let dm_invites = match received_dm_invites {
-        PacketState::Response(invites) => {
-            rsx! {
-                for invite in invites {
-                    ReceivedInvite { key: invite.id, invite, credentials }
+    let received_group_invites = future_retry_loop!(server::get_received_group_invites(credentials));
+    let invites = match received_dm_invites {
+        PacketState::Response(dm_invites) => {
+            match received_group_invites {
+                PacketState::Response(group_invites) => {
+                    rsx! {
+                        for invite in dm_invites {
+                            ReceivedInvite { key: invite.id * 2, invite: Invite::Conversation(invite), credentials }
+                        }
+                        for invite in group_invites {
+                            ReceivedInvite { key: invite.id * 2 + 1, invite: Invite::Group(invite), credentials }
+                        }
+                    }
                 }
+                PacketState::Waiting => rsx!(p { "Loading invites..." }),
+                PacketState::ServerError(err) => rsx!(p { "Server error: {err:?}" }),
+                PacketState::RequestTimeout => rsx!(p { "Request timeout" }),
+                PacketState::NotStarted => unreachable!(),
             }
         }
-        PacketState::Waiting => {
-            rsx!(p { "Loading invites..." })
-        }
-        PacketState::ServerError(err) => {
-            rsx! {p { "Server error: {err:?}" }}
-        }
-        PacketState::RequestTimeout => {
-            rsx!(p { "Request timeout" })
-        }
+        PacketState::Waiting => rsx!(p { "Loading invites..." }),
+        PacketState::ServerError(err) => rsx!(p { "Server error: {err:?}" }),
+        PacketState::RequestTimeout => rsx!(p { "Request timeout" }),
         PacketState::NotStarted => unreachable!(),
     };
     rsx! {
         h3 { "Received invites" }
-        {dm_invites}
+        {invites}
     }
 }
 
 #[component]
-pub fn SentInvite(invite: DmInvite, credentials: AccountCredentials) -> Element {
+fn SentInvite(invite: Invite, credentials: AccountCredentials) -> Element {
     const ICON_TRANSPARENT: Asset = asset!(
         "/assets/icon_transparent.png",
         ImageAssetOptions::new()
@@ -127,6 +144,8 @@ pub fn SentInvite(invite: DmInvite, credentials: AccountCredentials) -> Element 
     );
 
     let mut cancel_result = use_signal(|| PacketState::NotStarted);
+    let mut user_data = use_signal(|| PacketState::NotStarted);
+    let mut group_data = use_signal(|| PacketState::NotStarted);
     let status = match (*cancel_result.read()).clone() {
         PacketState::Response(()) => {
             return rsx!();
@@ -137,7 +156,6 @@ pub fn SentInvite(invite: DmInvite, credentials: AccountCredentials) -> Element 
         PacketState::NotStarted => rsx!(),
     };
 
-    // TODO: Cache user data.
     macro_rules! icon {
         ($icon:expr) => {
             rsx! {
@@ -150,23 +168,50 @@ pub fn SentInvite(invite: DmInvite, credentials: AccountCredentials) -> Element 
             }
         };
     }
-    let user_data_result = future_retry_loop!(server::get_user_data(invite.other_id, credentials));
-    let (username, email, icon) = match user_data_result.clone() {
+    let (invited_id, group_id) = match invite {
+        Invite::Conversation(invite) => (invite.other_id, None),
+        Invite::Group(ref invite) => (invite.invited_id, Some(invite.group_id)),
+    };
+    use_future(move || async move {
+        CACHE.user_data(invited_id, credentials, &mut user_data).await;
+    });
+    if let Some(id) = group_id {
+        use_future(move || async move {
+            CACHE.group_data(id, credentials, &mut group_data).await;
+        });
+    }
+    let (group_name, group_icon) = match group_data() {
+        PacketState::Response(Some(group)) => (Some(group.name), Some(icon!(GoPeople))),
+        PacketState::Response(None) => (Some("Deleted group".to_owned()), Some(icon!(GoCircleSlash))),
+        PacketState::Waiting => (Some("Loading group name...".to_owned()), Some(icon!(GoSync))),
+        PacketState::ServerError(err) => (Some(format!("Error: {err}")), Some(icon!(GoAlert))),
+        PacketState::RequestTimeout => (Some("Timeout".to_owned()), Some(icon!(GoAlert))),
+        PacketState::NotStarted => (None, None),
+    };
+    let (username, email, icon) = match user_data() {
         PacketState::Response(Some(account)) => (
             account.username,
             account.email,
-            if invite.encrypted {
-                icon!(GoLock)
-            } else {
-                icon!(GoUnlock)
-            },
+            match invite {
+                Invite::Conversation(invite) => {
+                    if invite.encrypted {
+                        icon!(GoLock)
+                    } else {
+                        icon!(GoUnlock)
+                    }
+                }
+                Invite::Group(_) => rsx!(),
+            }
         ),
         PacketState::Response(None) => (
             Some("Deleted account".to_owned()),
             None,
             icon!(GoCircleSlash),
         ),
-        PacketState::Waiting => (Some("Loading user data...".to_owned()), None, icon!(GoSync)),
+        PacketState::NotStarted |
+        PacketState::Waiting => {
+            (Some("Loading user data...".to_owned()), None, icon!(GoSync))
+        }
         PacketState::ServerError(err) => (
             Some("Server error".to_string()),
             Some(err.to_string()),
@@ -175,7 +220,6 @@ pub fn SentInvite(invite: DmInvite, credentials: AccountCredentials) -> Element 
         PacketState::RequestTimeout => {
             (Some("Request timed out".to_string()), None, icon!(GoAlert))
         }
-        PacketState::NotStarted => unreachable!(),
     };
     let title = username.unwrap_or_else(|| email.clone().unwrap_or("Anonymous".to_owned()));
 
@@ -204,10 +248,26 @@ pub fn SentInvite(invite: DmInvite, credentials: AccountCredentials) -> Element 
                     margin: 0,
 
                     {title}
-                    div {
-                        display: "inline-block",
-                        padding_left: "4px",
-                        {icon}
+                    if let Ok(icon) = icon {
+                        div {
+                            display: "inline-block",
+                            padding_left: "10px",
+                            {icon}
+                        }
+                    }
+                    if let Some(group_icon) = group_icon {
+                        div {
+                            display: "inline-block",
+                            padding_left: "6px",
+                            {group_icon}
+                        }
+                    }
+                    if let Some(group_name) = group_name {
+                        div {
+                            display: "inline-block",
+                            padding_left: "6px",
+                            {group_name}
+                        }
                     }
                 }
                 p {
@@ -217,16 +277,26 @@ pub fn SentInvite(invite: DmInvite, credentials: AccountCredentials) -> Element 
                     {email}
                 }
             }
-            if matches!(user_data_result, PacketState::Response(_)) && *cancel_result.read() == PacketState::NotStarted {
+            if matches!(user_data(), PacketState::Response(_)) && *cancel_result.read() == PacketState::NotStarted {
                 button {
                     font_size: "16px",
                     padding: "8px 12px",
-                    onclick: move |_| async move {
-                        PacketSender::default()
-                            .retry_loop(|| async {
-                                server::cancel_dm_invite(invite.id, credentials).await
-                            }, &mut cancel_result)
-                            .await;
+                    onclick: move |_| {
+                        let invite = invite.clone();
+                        async move {
+                            PacketSender::default()
+                                .retry_loop(|| async {
+                                    match invite.clone() {
+                                        Invite::Conversation(invite) => {
+                                            server::cancel_dm_invite(invite.id, credentials).await
+                                        }
+                                        Invite::Group(invite) => {
+                                            server::cancel_group_invite(invite.id, credentials).await
+                                        }
+                                    }
+                                }, &mut cancel_result)
+                                .await;
+                        }
                     },
                     "Cancel"
                 }
@@ -238,7 +308,7 @@ pub fn SentInvite(invite: DmInvite, credentials: AccountCredentials) -> Element 
 }
 
 #[component]
-pub fn ReceivedInvite(invite: DmInvite, credentials: AccountCredentials) -> Element {
+pub fn ReceivedInvite(invite: Invite, credentials: AccountCredentials) -> Element {
     const ICON_TRANSPARENT: Asset = asset!(
         "/assets/icon_transparent.png",
         ImageAssetOptions::new()
@@ -251,9 +321,15 @@ pub fn ReceivedInvite(invite: DmInvite, credentials: AccountCredentials) -> Elem
 
     let mut accept_result = use_signal(|| PacketState::NotStarted);
     let mut reject_result = use_signal(|| PacketState::NotStarted);
+    let mut user_data = use_signal(|| PacketState::NotStarted);
+    let mut group_data = use_signal(|| PacketState::NotStarted);
     let status = match (*accept_result.read()).clone() {
-        PacketState::Response(group_id) => {
+        PacketState::Response(Some(group_id)) => {
             println!("Created DM group: {group_id}");
+            return rsx!();
+        }
+        PacketState::Response(None) => {
+            println!("Joined DM group");
             return rsx!();
         }
         PacketState::Waiting => rsx!(p { "Accepting..." }),
@@ -270,7 +346,6 @@ pub fn ReceivedInvite(invite: DmInvite, credentials: AccountCredentials) -> Elem
         },
     };
 
-    // TODO: Cache user data.
     macro_rules! icon {
         ($icon:expr) => {
             rsx! {
@@ -283,24 +358,50 @@ pub fn ReceivedInvite(invite: DmInvite, credentials: AccountCredentials) -> Elem
             }
         };
     }
-    let user_data_result =
-        future_retry_loop!(server::get_user_data(invite.initiator_id, credentials));
-    let (username, email, icon) = match user_data_result.clone() {
+    let (inviter_id, group_id) = match invite {
+        Invite::Conversation(invite) => (invite.initiator_id, None),
+        Invite::Group(ref invite) => (invite.inviter_id, Some(invite.group_id)),
+    };
+    use_future(move || async move {
+        CACHE.user_data(inviter_id, credentials, &mut user_data).await;
+    });
+    if let Some(id) = group_id {
+        use_future(move || async move {
+            CACHE.group_data(id, credentials, &mut group_data).await;
+        });
+    }
+    let (group_name, group_icon) = match group_data() {
+        PacketState::Response(Some(group)) => (Some(group.name), Some(icon!(GoPeople))),
+        PacketState::Response(None) => (Some("Deleted group".to_owned()), Some(icon!(GoCircleSlash))),
+        PacketState::Waiting => (Some("Loading group name...".to_owned()), Some(icon!(GoSync))),
+        PacketState::ServerError(err) => (Some(format!("Error: {err}")), Some(icon!(GoAlert))),
+        PacketState::RequestTimeout => (Some("Timeout".to_owned()), Some(icon!(GoAlert))),
+        PacketState::NotStarted => (None, None),
+    };
+    let (username, email, icon) = match user_data() {
         PacketState::Response(Some(account)) => (
             account.username,
             account.email,
-            if invite.encrypted {
-                icon!(GoLock)
-            } else {
-                icon!(GoUnlock)
-            },
+            match invite {
+                Invite::Conversation(invite) => {
+                    if invite.encrypted {
+                        icon!(GoLock)
+                    } else {
+                        icon!(GoUnlock)
+                    }
+                }
+                Invite::Group(_) => rsx!(),
+            }
         ),
         PacketState::Response(None) => (
             Some("Deleted account".to_owned()),
             None,
             icon!(GoCircleSlash),
         ),
-        PacketState::Waiting => (Some("Loading user data...".to_owned()), None, icon!(GoSync)),
+        PacketState::NotStarted |
+        PacketState::Waiting => {
+            (Some("Loading user data...".to_owned()), None, icon!(GoSync))
+        }
         PacketState::ServerError(err) => (
             Some("Server error".to_string()),
             Some(err.to_string()),
@@ -309,9 +410,10 @@ pub fn ReceivedInvite(invite: DmInvite, credentials: AccountCredentials) -> Elem
         PacketState::RequestTimeout => {
             (Some("Request timed out".to_string()), None, icon!(GoAlert))
         }
-        PacketState::NotStarted => unreachable!(),
     };
     let title = username.unwrap_or_else(|| email.clone().unwrap_or("Anonymous".to_owned()));
+    let invite1 = invite.clone();
+    let invite2 = invite.clone();
 
     rsx! {
         div {
@@ -338,10 +440,26 @@ pub fn ReceivedInvite(invite: DmInvite, credentials: AccountCredentials) -> Elem
                     margin: 0,
 
                     {title}
-                    div {
-                        display: "inline-block",
-                        padding_left: "4px",
-                        {icon}
+                    if let Ok(icon) = icon {
+                        div {
+                            display: "inline-block",
+                            padding_left: "4px",
+                            {icon}
+                        }
+                    }
+                    if let Some(group_icon) = group_icon {
+                        div {
+                            display: "inline-block",
+                            padding_left: "6px",
+                            {group_icon}
+                        }
+                    }
+                    if let Some(group_name) = group_name {
+                        div {
+                            display: "inline-block",
+                            padding_left: "6px",
+                            {group_name}
+                        }
                     }
                 }
                 p {
@@ -351,29 +469,49 @@ pub fn ReceivedInvite(invite: DmInvite, credentials: AccountCredentials) -> Elem
                     {email}
                 }
             }
-            if matches!(user_data_result, PacketState::Response(_)) && *accept_result.read() == PacketState::NotStarted && *reject_result.read() == PacketState::NotStarted {
+            if matches!(user_data(), PacketState::Response(_)) && *accept_result.read() == PacketState::NotStarted && *reject_result.read() == PacketState::NotStarted {
                 button {
                     font_size: "16px",
                     padding: "8px 12px",
                     margin_right: "8px",
-                    onclick: move |_| async move {
-                        PacketSender::default()
-                            .retry_loop(|| async {
-                                server::accept_dm_invite(invite.id, credentials).await
-                            }, &mut accept_result)
-                            .await;
+                    onclick: move |_| {
+                        let invite = invite1.clone();
+                        async move {
+                            PacketSender::default()
+                                .retry_loop(|| async {
+                                    match invite.clone() {
+                                        Invite::Conversation(invite) => {
+                                            server::accept_dm_invite(invite.id, credentials).await.map(Some)
+                                        }
+                                        Invite::Group(invite) => {
+                                            server::accept_group_invite(invite.id, credentials).await.map(|_| None)
+                                        }
+                                    }
+                                }, &mut accept_result)
+                                .await;
+                        }
                     },
                     "Accept"
                 }
                 button {
                     font_size: "16px",
                     padding: "8px 12px",
-                    onclick: move |_| async move {
-                        PacketSender::default()
-                            .retry_loop(|| async {
-                                server::reject_dm_invite(invite.id, credentials).await
-                            }, &mut reject_result)
-                            .await;
+                    onclick: move |_| {
+                        let invite = invite2.clone();
+                        async move {
+                            PacketSender::default()
+                                .retry_loop(|| async {
+                                    match invite.clone() {
+                                        Invite::Conversation(invite) => {
+                                            server::reject_dm_invite(invite.id, credentials).await
+                                        }
+                                        Invite::Group(invite) => {
+                                            server::reject_group_invite(invite.id, credentials).await
+                                        }
+                                    }
+                                }, &mut reject_result)
+                                .await;
+                        }
                     },
                     "Reject"
                 }
