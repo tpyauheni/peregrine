@@ -117,6 +117,16 @@ pub fn default_rng() -> bee2rs::DefaultRng {
     bee2rs::rng()
 }
 
+#[derive(Debug, Clone, PartialEq, Eq)]
+pub struct PublicKey {
+    pub pk: Box<[u8]>,
+}
+
+#[derive(Clone, PartialEq, Eq)]
+pub struct PrivateKey {
+    pub sk: Box<[u8]>,
+}
+
 pub fn hash(alg_name: &str, data: &[u8]) -> Option<Box<[u8]>> {
     match alg_name {
         #[cfg(feature = "bee2-rs")]
@@ -132,7 +142,7 @@ pub fn cryptosets() -> Vec<String> {
     ]
 }
 
-pub fn generate_keypair(alg_name: &str) -> Option<(Box<[u8]>, Box<[u8]>)> {
+pub fn generate_keypair(alg_name: &str) -> Option<(PrivateKey, PublicKey)> {
     match alg_name {
         #[cfg(feature = "bee2-rs")]
         "bycrypto" => Some(bee2rs::generate_keypair()),
@@ -140,7 +150,12 @@ pub fn generate_keypair(alg_name: &str) -> Option<(Box<[u8]>, Box<[u8]>)> {
     }
 }
 
-pub fn sign(alg_name: &str, private_key: &[u8], public_key: &[u8], data: &[u8]) -> Option<Box<[u8]>> {
+pub fn sign(
+    alg_name: &str,
+    private_key: PrivateKey,
+    public_key: PublicKey,
+    data: &[u8],
+) -> Option<Box<[u8]>> {
     let hash = hash("bycrypto", data)?;
     match alg_name {
         #[cfg(feature = "bee2-rs")]
@@ -149,7 +164,12 @@ pub fn sign(alg_name: &str, private_key: &[u8], public_key: &[u8], data: &[u8]) 
     }
 }
 
-pub fn verify(alg_name: &str, public_key: &[u8], data: &[u8], signature: &[u8]) -> Option<bool> {
+pub fn verify(
+    alg_name: &str,
+    public_key: PublicKey,
+    data: &[u8],
+    signature: &[u8],
+) -> Option<bool> {
     let hash = hash(alg_name, data)?;
     match alg_name {
         #[cfg(feature = "bee2-rs")]
@@ -158,10 +178,19 @@ pub fn verify(alg_name: &str, public_key: &[u8], data: &[u8], signature: &[u8]) 
     }
 }
 
-pub fn diffie_hellman(alg_name: &str, self_public_key: &[u8], self_private_key: &[u8], other_public_key: &[u8]) -> Option<Box<[u8]>> {
+pub fn diffie_hellman(
+    alg_name: &str,
+    self_private_key: PrivateKey,
+    self_public_key: PublicKey,
+    other_public_key: PublicKey,
+) -> Option<Box<[u8]>> {
     match alg_name {
         #[cfg(feature = "bee2-rs")]
-        "bycrypto" => Some(bee2rs::diffie_hellman(self_public_key, self_private_key, other_public_key)),
+        "bycrypto" => Some(bee2rs::diffie_hellman(
+            self_private_key,
+            self_public_key,
+            other_public_key,
+        )),
         _ => None,
     }
 }
@@ -174,7 +203,12 @@ pub fn kdf(alg_name: &str, data: &[u8], result_len: usize) -> Option<Box<[u8]>> 
     }
 }
 
-pub fn aead_wrap(alg_name: &str, plaintext: &[u8], key: &[u8], public_data: &[u8]) -> Option<(Box<[u8]>, Box<[u8]>)> {
+pub fn aead_wrap(
+    alg_name: &str,
+    plaintext: &[u8],
+    key: PrivateKey,
+    public_data: &[u8],
+) -> Option<(Box<[u8]>, Box<[u8]>)> {
     match alg_name {
         #[cfg(feature = "bee2-rs")]
         "bycrypto" => Some(bee2rs::aead_wrap(plaintext, key, public_data)),
@@ -182,7 +216,13 @@ pub fn aead_wrap(alg_name: &str, plaintext: &[u8], key: &[u8], public_data: &[u8
     }
 }
 
-pub fn aead_unwrap(alg_name: &str, ciphertext: &[u8], public_data: &[u8], mac: &[u8], key: &[u8]) -> Option<Option<Box<[u8]>>> {
+pub fn aead_unwrap(
+    alg_name: &str,
+    ciphertext: &[u8],
+    public_data: &[u8],
+    mac: &[u8],
+    key: PrivateKey,
+) -> Option<Option<Box<[u8]>>> {
     match alg_name {
         #[cfg(feature = "bee2-rs")]
         "bycrypto" => Some(bee2rs::aead_unwrap(ciphertext, public_data, mac, key)),

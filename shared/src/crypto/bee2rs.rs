@@ -1,4 +1,4 @@
-use crate::crypto::get_iv;
+use crate::crypto::{PrivateKey, PublicKey, get_iv};
 
 use super::{
     AsymmetricCipher, AsymmetricCipherPrivate, AsymmetricCipherPublic, CryptographyAlgorithmSet,
@@ -197,32 +197,51 @@ pub(crate) fn hash(data: &[u8]) -> Box<[u8]> {
     Bash512::hash(data).unwrap()
 }
 
-pub(crate) fn generate_keypair() -> (Box<[u8]>, Box<[u8]>) {
-    let key = BignKey::try_new(BignParameters::try_new(BignParametersConfiguration::B3).unwrap(), &mut rng()).unwrap();
-    (key.private_key, key.public_key)
+pub(crate) fn generate_keypair() -> (PrivateKey, PublicKey) {
+    let key = BignKey::try_new(
+        BignParameters::try_new(BignParametersConfiguration::B3).unwrap(),
+        &mut rng(),
+    )
+    .unwrap();
+    (
+        PrivateKey {
+            sk: key.private_key,
+        },
+        PublicKey { pk: key.public_key },
+    )
 }
 
-pub(crate) fn sign(private_key: &[u8], public_key: &[u8], hash: &[u8]) -> Box<[u8]> {
-    let key = BignKey::try_load(BignParameters::try_new(BignParametersConfiguration::B3).unwrap(), public_key, private_key).unwrap();
+pub(crate) fn sign(private_key: PrivateKey, public_key: PublicKey, hash: &[u8]) -> Box<[u8]> {
+    let key = BignKey::try_load(
+        BignParameters::try_new(BignParametersConfiguration::B3).unwrap(),
+        &public_key.pk,
+        &private_key.sk,
+    )
+    .unwrap();
     key.sign(hash, &mut rng()).unwrap()
 }
 
-pub(crate) fn verify(public_key: &[u8], hash: &[u8], signature: &[u8]) -> bool {
+pub(crate) fn verify(public_key: PublicKey, hash: &[u8], signature: &[u8]) -> bool {
     let key = BignKey {
         private_key: Box::new([]),
-        public_key: Box::from(public_key),
+        public_key: Box::new([]),
         params: BignParameters::try_new(BignParametersConfiguration::B3).unwrap(),
     };
-    key.verify(public_key, hash, signature).is_ok()
+    key.verify(&public_key.pk, hash, signature).is_ok()
 }
 
-pub(crate) fn diffie_hellman(self_public_key: &[u8], self_private_key: &[u8], other_public_key: &[u8]) -> Box<[u8]> {
+pub(crate) fn diffie_hellman(
+    self_private_key: PrivateKey,
+    self_public_key: PublicKey,
+    other_public_key: PublicKey,
+) -> Box<[u8]> {
     let mut key = BignKey::try_load(
         BignParameters::try_new(BignParametersConfiguration::B3).unwrap(),
-        self_public_key,
-        self_private_key,
-    ).unwrap();
-    key.diffie_hellman(other_public_key, 32).unwrap()
+        &self_public_key.pk,
+        &self_private_key.sk,
+    )
+    .unwrap();
+    key.diffie_hellman(&other_public_key.pk, 32).unwrap()
 }
 
 // TODO: Add to upstream library.
@@ -248,18 +267,24 @@ pub(crate) fn kdf(data: &[u8], result_len: usize) -> Box<[u8]> {
     Box::from(&result[..result_len])
 }
 
-pub(crate) fn aead_wrap(plaintext: &[u8], key: &[u8], public_data: &[u8]) -> (Box<[u8]>, Box<[u8]>) {
-    let key = BeltKey256::new(key.try_into().unwrap());
+pub(crate) fn aead_wrap(
+    plaintext: &[u8],
+    key: PrivateKey,
+    public_data: &[u8],
+) -> (Box<[u8]>, Box<[u8]>) {
+    let key = BeltKey256::new(((&key.sk) as &[u8]).try_into().unwrap());
     let iv = key.clone().to_key128().get_bytes();
     let (ciphertext, mac) = BeltDwp::wrap(plaintext, public_data, &key, *iv).unwrap();
     (ciphertext, Box::from(mac))
 }
 
-pub(crate) fn aead_unwrap(ciphertext: &[u8], public_data: &[u8], mac: &[u8], key: &[u8]) -> Option<Box<[u8]>> {
-    let key = BeltKey256::new(key.try_into().unwrap());
+pub(crate) fn aead_unwrap(
+    ciphertext: &[u8],
+    public_data: &[u8],
+    mac: &[u8],
+    key: PrivateKey,
+) -> Option<Box<[u8]>> {
+    let key = BeltKey256::new(((&key.sk) as &[u8]).try_into().unwrap());
     let iv = key.clone().to_key128().get_bytes();
-    match BeltDwp::unwrap(ciphertext, public_data, mac.try_into().unwrap(), &key, *iv) {
-        Ok(data) => Some(data),
-        Err(_) => None,
-    }
+    BeltDwp::unwrap(ciphertext, public_data, mac.try_into().unwrap(), &key, *iv).ok()
 }

@@ -3,23 +3,25 @@ use super::*;
 #[derive(Clone)]
 pub struct X3DhReceiverKeysPublic {
     pub alg_name: String,
-    pub ik: Box<[u8]>,
-    pub spk: Box<[u8]>,
+    pub ik: PublicKey,
+    pub spk: PublicKey,
     pub spk_signature: Box<[u8]>,
-    pub opks: Vec<Box<[u8]>>,
+    pub opks: Vec<PublicKey>,
 }
 
 #[derive(Clone)]
 pub struct X3DhReceiverKeysPrivate {
-    pub ik: Box<[u8]>,
-    pub spk: Box<[u8]>,
-    pub opks: Vec<Box<[u8]>>,
+    pub ik: PrivateKey,
+    pub spk: PrivateKey,
+    pub opks: Vec<PrivateKey>,
 }
 
-pub fn generate_receiver_keys(alg_name: &str) -> Option<(X3DhReceiverKeysPrivate, X3DhReceiverKeysPublic)> {
+pub fn generate_receiver_keys(
+    alg_name: &str,
+) -> Option<(X3DhReceiverKeysPrivate, X3DhReceiverKeysPublic)> {
     let (ik_priv, ik_pub) = generate_keypair(alg_name)?;
     let (spk_priv, spk_pub) = generate_keypair(alg_name)?;
-    let spk_signature = sign(alg_name, &ik_priv, &ik_pub, &spk_pub)?;
+    let spk_signature = sign(alg_name, ik_priv.clone(), ik_pub.clone(), &spk_pub.pk)?;
 
     let mut opks_priv = Vec::new();
     let mut opks_pub = Vec::new();
@@ -47,7 +49,7 @@ pub fn generate_receiver_keys(alg_name: &str) -> Option<(X3DhReceiverKeysPrivate
 
 #[derive(Clone)]
 pub struct X3DhData {
-    ek_pub: Box<[u8]>,
+    ek_pub: PublicKey,
     opk_id: Option<u32>,
     ciphertext: Box<[u8]>,
     mac: Box<[u8]>,
@@ -63,25 +65,42 @@ pub enum X3DhEncodeResult {
 
 pub fn encode_x3dh(
     data: &[u8],
-    ik_priv: &[u8],
-    ik_pub: &[u8],
+    ik_priv: PrivateKey,
+    ik_pub: PublicKey,
     other_keys: X3DhReceiverKeysPublic,
 ) -> X3DhEncodeResult {
     let alg_name = &other_keys.alg_name;
 
-    match verify(alg_name, &other_keys.ik, &other_keys.spk, &other_keys.spk_signature) {
-        Some(true) => {},
+    match verify(
+        alg_name,
+        other_keys.ik.clone(),
+        &other_keys.spk.pk,
+        &other_keys.spk_signature,
+    ) {
+        Some(true) => {}
         Some(false) => return X3DhEncodeResult::InvalidSignature,
         None => return X3DhEncodeResult::AlgorithmNotSupported,
     }
 
     let Some((ek_priv, ek_pub)) = generate_keypair(alg_name) else {
-        return X3DhEncodeResult::AlgorithmNotSupported
+        return X3DhEncodeResult::AlgorithmNotSupported;
     };
 
-    let dh1 = diffie_hellman(alg_name, ik_pub, ik_priv, &other_keys.spk).unwrap();
-    let dh2 = diffie_hellman(alg_name, &ek_pub, &ek_priv, &other_keys.ik).unwrap();
-    let dh3 = diffie_hellman(alg_name, &ek_pub, &ek_priv, &other_keys.spk).unwrap();
+    let dh1 = diffie_hellman(
+        alg_name,
+        ik_priv.clone(),
+        ik_pub.clone(),
+        other_keys.spk.clone(),
+    )
+    .unwrap();
+    let dh2 = diffie_hellman(
+        alg_name,
+        ek_priv.clone(),
+        ek_pub.clone(),
+        other_keys.ik.clone(),
+    )
+    .unwrap();
+    let dh3 = diffie_hellman(alg_name, ek_priv, ek_pub.clone(), other_keys.spk).unwrap();
     let mut combined_dh = vec![];
     combined_dh.extend(dh1);
     combined_dh.extend(dh2);
@@ -101,22 +120,23 @@ pub fn encode_x3dh(
     };
 
     if let Some(opk) = opk {
-        combined_dh.extend(opk);
+        combined_dh.extend(opk.pk.clone());
     }
 
     let sk = kdf(alg_name, &combined_dh, 32).unwrap();
     let sk2 = kdf(alg_name, &sk, 32).unwrap();
+    let sk2 = PrivateKey { sk: sk2 };
 
     let mut ad = vec![];
-    ad.extend(ik_pub);
-    ad.extend(other_keys.ik);
+    ad.extend(ik_pub.pk.clone());
+    ad.extend(other_keys.ik.pk);
 
-    let (ciphertext, mac) = aead_wrap(alg_name, data, &sk2, &ad).unwrap();
+    let (ciphertext, mac) = aead_wrap(alg_name, data, sk2, &ad).unwrap();
 
     let mut signed_data = vec![];
-    signed_data.extend(ek_pub.clone());
+    signed_data.extend(ek_pub.pk.clone());
     if let Some(opk) = opk {
-        signed_data.extend(opk);
+        signed_data.extend(opk.pk.clone());
     }
     signed_data.extend(ciphertext.clone());
     // TODO: Idk with which key to sign as it's not specified by documentation provided. So I
@@ -143,50 +163,74 @@ pub enum X3DhDecodeResult {
 
 pub fn decode_x3dh(
     data: X3DhData,
-    other_ik_pub: &[u8],
+    other_ik_pub: PublicKey,
     self_keys_public: X3DhReceiverKeysPublic,
     self_keys_private: X3DhReceiverKeysPrivate,
 ) -> X3DhDecodeResult {
     let alg_name = &self_keys_public.alg_name;
 
     let mut signed_data = vec![];
-    signed_data.extend(data.ek_pub.clone());
+    signed_data.extend(data.ek_pub.pk.clone());
     let mut opk = None;
     if let Some(opk_id) = data.opk_id {
         let Some(opk_bytes) = self_keys_public.opks.get(opk_id as usize) else {
             return X3DhDecodeResult::InvalidOpkKeyId;
         };
         opk = Some(opk_bytes);
-        signed_data.extend(opk_bytes);
+        signed_data.extend(opk_bytes.pk.clone());
     }
     signed_data.extend(data.ciphertext.clone());
 
-    match verify(alg_name, other_ik_pub, &signed_data, &data.signature) {
-        Some(true) => {},
+    match verify(
+        alg_name,
+        other_ik_pub.clone(),
+        &signed_data,
+        &data.signature,
+    ) {
+        Some(true) => {}
         Some(false) => return X3DhDecodeResult::InvalidSignature,
         None => return X3DhDecodeResult::UnsupportedAlgorithm,
     }
 
-    let dh1 = diffie_hellman(alg_name, &self_keys_public.spk, &self_keys_private.spk, other_ik_pub).unwrap();
-    let dh2 = diffie_hellman(alg_name, &self_keys_public.ik, &self_keys_private.ik, &data.ek_pub).unwrap();
-    let dh3 = diffie_hellman(alg_name, &self_keys_public.spk, &self_keys_private.spk, &data.ek_pub).unwrap();
+    let dh1 = diffie_hellman(
+        alg_name,
+        self_keys_private.spk.clone(),
+        self_keys_public.spk.clone(),
+        other_ik_pub.clone(),
+    )
+    .unwrap();
+    let dh2 = diffie_hellman(
+        alg_name,
+        self_keys_private.ik,
+        self_keys_public.ik.clone(),
+        data.ek_pub.clone(),
+    )
+    .unwrap();
+    let dh3 = diffie_hellman(
+        alg_name,
+        self_keys_private.spk,
+        self_keys_public.spk,
+        data.ek_pub,
+    )
+    .unwrap();
     let mut combined_dh = vec![];
     combined_dh.extend(dh1);
     combined_dh.extend(dh2);
     combined_dh.extend(dh3);
 
     if let Some(opk) = opk {
-        combined_dh.extend(opk);
+        combined_dh.extend(opk.pk.clone());
     }
 
     let sk = kdf(alg_name, &combined_dh, 32).unwrap();
     let sk2 = kdf(alg_name, &sk, 32).unwrap();
+    let sk2 = PrivateKey { sk: sk2 };
 
     let mut ad = vec![];
-    ad.extend(other_ik_pub);
-    ad.extend(self_keys_public.ik);
+    ad.extend(other_ik_pub.pk);
+    ad.extend(self_keys_public.ik.pk);
 
-    match aead_unwrap(alg_name, &data.ciphertext, &ad, &data.mac, &sk2) {
+    match aead_unwrap(alg_name, &data.ciphertext, &ad, &data.mac, sk2) {
         Some(Some(plaintext)) => X3DhDecodeResult::Data(plaintext),
         Some(None) => X3DhDecodeResult::DecryptionFailure,
         None => X3DhDecodeResult::UnsupportedAlgorithm,
@@ -195,18 +239,28 @@ pub fn decode_x3dh(
 
 #[cfg(test)]
 mod tests {
-    use crate::crypto::x3dh::{decode_x3dh, encode_x3dh, generate_receiver_keys, X3DhDecodeResult};
+    use crate::crypto::x3dh::{X3DhDecodeResult, decode_x3dh, encode_x3dh, generate_receiver_keys};
 
     #[test]
     fn test_x3dh() {
         let random_keys_a = generate_receiver_keys("bycrypto").unwrap();
         let random_keys_b = generate_receiver_keys("bycrypto").unwrap();
         let message = "Hello, World!".as_bytes();
-        let encode_data = match encode_x3dh(message, &random_keys_a.0.ik, &random_keys_a.1.ik, random_keys_b.1.clone()) {
+        let encode_data = match encode_x3dh(
+            message,
+            random_keys_a.0.ik,
+            random_keys_a.1.ik.clone(),
+            random_keys_b.1.clone(),
+        ) {
             super::X3DhEncodeResult::Data(data) => data,
             _ => panic!(),
         };
-        let decoded_data = match decode_x3dh(encode_data, &random_keys_a.1.ik, random_keys_b.1, random_keys_b.0) {
+        let decoded_data = match decode_x3dh(
+            encode_data,
+            random_keys_a.1.ik,
+            random_keys_b.1,
+            random_keys_b.0,
+        ) {
             X3DhDecodeResult::Data(data) => data,
             _ => panic!(),
         };

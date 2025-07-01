@@ -1,12 +1,13 @@
 use std::{rc::Rc, time::Duration};
 
-use client::{future_retry_loop, packet_sender::{PacketSender, PacketState}};
-use dioxus::{logger::tracing::error, prelude::*};
+use client::{cache::CACHE, future_retry_loop, packet_sender::PacketState};
+use dioxus::{html::geometry::euclid::Size2D, logger::tracing::error, prelude::*};
 use server::{AccountCredentials, DmGroup, DmMessage, FoundAccount, GroupMessage, MultiUserGroup};
 
 use crate::Route;
 
 #[component]
+#[allow(non_snake_case)]
 pub fn Contacts(credentials: AccountCredentials) -> Element {
     let mut found_users: Signal<Option<Vec<FoundAccount>>> = use_signal(|| None);
     let joined_dm_groups = future_retry_loop!(server::get_joined_dm_groups(credentials));
@@ -15,7 +16,10 @@ pub fn Contacts(credentials: AccountCredentials) -> Element {
     let selected_group: Signal<Option<MultiUserGroup>> = use_signal(|| None);
     let item_list = if let Some(users) = found_users() {
         if users.is_empty() {
-            rsx!(h3 { "No accounts are matching the search query" })
+            rsx!(h3 {
+                margin: "20px",
+                "No accounts are matching the search query."
+            })
         } else {
             rsx! {
                 for user in users {
@@ -25,34 +29,35 @@ pub fn Contacts(credentials: AccountCredentials) -> Element {
         }
     } else {
         match joined_dm_groups {
-            PacketState::Response(dm_groups) => {
-                match joined_groups {
-                    PacketState::Response(groups) => {
-                        if dm_groups.is_empty() && groups.is_empty() {
-                            rsx!(h3 { "You are not a member of any groups or conversations" })
-                        } else {
-                            rsx! {
-                                for group in dm_groups {
-                                    DmGroupPanel { key: (group.id + u64::MAX / 2), group: group.clone(), user_id: credentials.id, selected_dm_group, selected_group }
-                                }
-                                for group in groups {
-                                    GroupPanel { key: group.id, group: group.clone(), user_id: credentials.id, selected_dm_group, selected_group }
-                                }
+            PacketState::Response(dm_groups) => match joined_groups {
+                PacketState::Response(groups) => {
+                    if dm_groups.is_empty() && groups.is_empty() {
+                        rsx!(h3 {
+                            margin: "20px",
+                            "You are not a member of any groups or conversations."
+                        })
+                    } else {
+                        rsx! {
+                            for group in dm_groups {
+                                DmGroupPanel { key: (group.id + u64::MAX / 2), group, user_id: credentials.id, selected_dm_group, selected_group, credentials }
+                            }
+                            for group in groups {
+                                GroupPanel { key: group.id, group: group.clone(), user_id: credentials.id, selected_dm_group, selected_group, credentials }
                             }
                         }
                     }
-                    PacketState::Waiting => {
-                        rsx!(h3 { "Loading..." })
-                    }
-                    PacketState::ServerError(err) => {
-                        rsx!(h3 { "Server error: {err:?}" })
-                    }
-                    PacketState::RequestTimeout => {
-                        rsx!(h3 { "Request timeout" })
-                    }
-                    PacketState::NotStarted => unreachable!(),
                 }
-            }
+                PacketState::Waiting => {
+                    rsx!(h3 { "Loading..." })
+                }
+                PacketState::ServerError(err) => {
+                    rsx!(h3 { "Server error: {err:?}" })
+                }
+                PacketState::RequestTimeout => {
+                    rsx!(h3 { "Request timeout" })
+                }
+                PacketState::NotStarted => unreachable!(),
+            },
             PacketState::Waiting => {
                 rsx!(h3 { "Loading..." })
             }
@@ -150,7 +155,10 @@ pub fn Contacts(credentials: AccountCredentials) -> Element {
                 } else if let Some(group) = selected_group() {
                     GroupMessagesPanel { selected_group: group, credentials }
                 } else {
-                    h2 { "Select a group or a conversation from the menu to the left" }
+                    h2 {
+                        margin: "20px",
+                        "Select a group or a conversation from the menu to the left."
+                    }
                 }
             }
         }
@@ -158,6 +166,7 @@ pub fn Contacts(credentials: AccountCredentials) -> Element {
 }
 
 #[component]
+#[allow(non_snake_case)]
 pub fn User(account: FoundAccount, credentials: AccountCredentials) -> Element {
     const ICON_TRANSPARENT: Asset = asset!(
         "/assets/icon_transparent.png",
@@ -213,12 +222,20 @@ pub fn User(account: FoundAccount, credentials: AccountCredentials) -> Element {
 }
 
 #[component]
+#[allow(non_snake_case)]
 fn DmMessagesPanel(selected_dm_group: DmGroup, credentials: AccountCredentials) -> Element {
     let mut msg_input: Signal<Option<Rc<MountedData>>> = use_signal(|| None);
     let mut message: Signal<String> = use_signal(String::new);
-    let mut sending_message: Signal<PacketState<u64>> = use_signal(|| PacketState::NotStarted);
+    let sending_message: Signal<PacketState<u64>> = use_signal(|| PacketState::NotStarted);
+    let mut cached_messages: Signal<Option<Vec<DmMessage>>> = use_signal(|| None);
 
     future_retry_loop! { dm_messages_signal, dm_messages_resource, server::fetch_new_dm_messages(selected_dm_group.id, 0, credentials) };
+    use_effect(move || {
+        if let PacketState::Response(mut messages) = dm_messages_signal() {
+            messages.reverse();
+            cached_messages.set(Some(messages.clone()));
+        }
+    });
     use_future(move || async move {
         loop {
             tokio::time::sleep(Duration::from_secs(5)).await;
@@ -227,28 +244,35 @@ fn DmMessagesPanel(selected_dm_group: DmGroup, credentials: AccountCredentials) 
     });
 
     // TODO: Store `last_received_message_id` and received messages in `Storage`.
-    let messages = match (dm_messages_signal()).clone() {
-        PacketState::Response(mut messages) => {
-            messages.reverse();
-            rsx! {
-                for message in messages {
-                    DmMessageComponent { message }
-                    // h4 { {format!("Message {} with encryption method \"{}\": {:?}", message.id, message.encryption_method, message.content)} }
-                }
+    let messages = if let Some(messages) = cached_messages() {
+        rsx! {
+            for message in messages {
+                DmMessageComponent { message }
             }
         }
-        PacketState::Waiting => {
-            rsx!(h1 { "Loading messages..." })
+    } else {
+        match dm_messages_signal() {
+            PacketState::Response(mut messages) => {
+                messages.reverse();
+                rsx! {
+                    for message in messages {
+                        DmMessageComponent { message }
+                    }
+                }
+            }
+            PacketState::Waiting => {
+                rsx!(h1 { "Loading messages..." })
+            }
+            PacketState::ServerError(err) => {
+                rsx!(h1 { "Server error: {err}" })
+            }
+            PacketState::RequestTimeout => {
+                rsx!(h1 { "Request timeout" })
+            }
+            PacketState::NotStarted => unreachable!(),
         }
-        PacketState::ServerError(err) => {
-            rsx!(h1 { "Server error: {err}" })
-        }
-        PacketState::RequestTimeout => {
-            rsx!(h1 { "Request timeout" })
-        }
-        PacketState::NotStarted => unreachable!(),
     };
-    let sending_messages = match (*sending_message.read()).clone() {
+    let sending_messages = match sending_message() {
         PacketState::Response(_) | PacketState::NotStarted => {
             rsx!()
         }
@@ -292,10 +316,6 @@ fn DmMessagesPanel(selected_dm_group: DmGroup, credentials: AccountCredentials) 
                 overflow: "auto",
                 padding: "16px",
 
-                // h3 { "Messages here:" }
-                // for i in 0..100 {
-                //     h4 { {format!("Message {i}!")} }
-                // }
                 {messages}
                 {sending_messages}
             }
@@ -310,31 +330,36 @@ fn DmMessagesPanel(selected_dm_group: DmGroup, credentials: AccountCredentials) 
                 width: "100%",
                 max_width: "calc(100% - 32px)",
                 height: "auto",
-                // height: "34px",
                 padding: "16px",
                 background_color: "#121519",
                 onclick: move |_| async move {
-                    let Some(msg_input) = msg_input.read().clone() else {
+                    let Some(msg_input) = msg_input() else {
                         return;
                     };
                     _ = msg_input.set_focus(true).await;
                 },
 
-                // TODO: Unset `contenteditable` and make text input work from keyboard using
-                // events.
                 textarea {
-                    class: "imitate-input",
+                    id: "main-msg-input",
+                    class: "imitate-input msg-textbox no-scrollbar",
                     role: "textbox",
-                    contenteditable: true,
-                    resize: "none",
                     value: "{message}",
-                    border: "none",
-                    background: "none",
-                    padding: 0,
-                    height: "auto",
                     onmounted: move |cx| msg_input.set(Some(cx.data())),
-                    oninput: move |event| {
+                    oninput: move |event| async move {
                         message.set(event.value());
+                        document::eval(r#"let input = document.getElementById("main-msg-input");
+                            let height = input.scrollHeight;
+                            if (height > 300) {
+                                input.style = "height: 300px";
+                            } else {
+                                input.style = "height: " + height + "px";
+                            }"#).await.unwrap();
+                        // if let Some(msg_input) = msg_input() {
+                            // let scroll_size = msg_input.get_scroll_size().await.unwrap_or(Size2D::zero());
+                            // msg_input.set_style(format!("height: {}px", scroll_size.height));
+                            // msg_input;
+                            //scroll_size.height
+                        // }
                     },
                     onkeydown: move |event| async move {
                         if event.code() != Code::Enter || event.modifiers().shift() {
@@ -342,7 +367,7 @@ fn DmMessagesPanel(selected_dm_group: DmGroup, credentials: AccountCredentials) 
                         }
                         event.prevent_default();
                         // TODO: Encryption.
-                        let content = (*message.read()).clone();
+                        let content = message();
                         let msg_bytes: Box<[u8]> = Box::from(content.clone().as_bytes());
                         println!("Send result: {:?}", server::send_dm_message(
                             selected_dm_group.id,
@@ -360,6 +385,8 @@ fn DmMessagesPanel(selected_dm_group: DmGroup, credentials: AccountCredentials) 
                         println!("Sending message: {content:?}");
                         message.set(String::new());
                         dm_messages_resource.restart();
+                        document::eval(r#"let input = document.getElementById("main-msg-input");
+                            input.style = "height: 36px";"#).await.unwrap();
                     }
                 }
             }
@@ -368,12 +395,20 @@ fn DmMessagesPanel(selected_dm_group: DmGroup, credentials: AccountCredentials) 
 }
 
 #[component]
+#[allow(non_snake_case)]
 fn GroupMessagesPanel(selected_group: MultiUserGroup, credentials: AccountCredentials) -> Element {
     let mut msg_input: Signal<Option<Rc<MountedData>>> = use_signal(|| None);
     let mut message: Signal<String> = use_signal(String::new);
-    let mut sending_message: Signal<PacketState<u64>> = use_signal(|| PacketState::NotStarted);
+    let sending_message: Signal<PacketState<u64>> = use_signal(|| PacketState::NotStarted);
+    let mut cached_messages: Signal<Option<Vec<GroupMessage>>> = use_signal(|| None);
 
     future_retry_loop! { group_messages_signal, group_messages_resource, server::fetch_new_group_messages(selected_group.id, 0, credentials) };
+    use_effect(move || {
+        if let PacketState::Response(mut messages) = group_messages_signal() {
+            messages.reverse();
+            cached_messages.set(Some(messages));
+        }
+    });
     use_future(move || async move {
         loop {
             tokio::time::sleep(Duration::from_secs(5)).await;
@@ -382,28 +417,35 @@ fn GroupMessagesPanel(selected_group: MultiUserGroup, credentials: AccountCreden
     });
 
     // TODO: Store `last_received_message_id` and received messages in `Storage`.
-    let messages = match (*group_messages_signal.read()).clone() {
-        PacketState::Response(mut messages) => {
-            messages.reverse();
-            rsx! {
-                for message in messages {
-                    GroupMessageComponent { message, self_id: credentials.id }
-                    // h4 { {format!("Message {} with encryption method \"{}\": {:?}", message.id, message.encryption_method, message.content)} }
-                }
+    let messages = if let Some(messages) = cached_messages() {
+        rsx! {
+            for message in messages {
+                GroupMessageComponent { message, self_id: credentials.id, credentials }
             }
         }
-        PacketState::Waiting => {
-            rsx!(h1 { "Loading messages..." })
+    } else {
+        match group_messages_signal() {
+            PacketState::Response(mut messages) => {
+                messages.reverse();
+                rsx! {
+                    for message in messages {
+                        GroupMessageComponent { message, self_id: credentials.id, credentials }
+                    }
+                }
+            }
+            PacketState::Waiting => {
+                rsx!(h1 { "Loading messages..." })
+            }
+            PacketState::ServerError(err) => {
+                rsx!(h1 { "Server error: {err}" })
+            }
+            PacketState::RequestTimeout => {
+                rsx!(h1 { "Request timeout" })
+            }
+            PacketState::NotStarted => unreachable!(),
         }
-        PacketState::ServerError(err) => {
-            rsx!(h1 { "Server error: {err}" })
-        }
-        PacketState::RequestTimeout => {
-            rsx!(h1 { "Request timeout" })
-        }
-        PacketState::NotStarted => unreachable!(),
     };
-    let sending_messages = match (*sending_message.read()).clone() {
+    let sending_messages = match sending_message() {
         PacketState::Response(_) | PacketState::NotStarted => {
             rsx!()
         }
@@ -469,27 +511,27 @@ fn GroupMessagesPanel(selected_group: MultiUserGroup, credentials: AccountCreden
                 padding: "16px",
                 background_color: "#121519",
                 onclick: move |_| async move {
-                    let Some(msg_input) = msg_input.read().clone() else {
+                    let Some(msg_input) = msg_input() else {
                         return;
                     };
                     _ = msg_input.set_focus(true).await;
                 },
 
-                // TODO: Unset `contenteditable` and make text input work from keyboard using
-                // events.
                 textarea {
-                    class: "imitate-input",
+                    id: "main-msg-input",
+                    class: "imitate-input msg-textbox no-scrollbar",
                     role: "textbox",
-                    contenteditable: true,
-                    resize: "none",
                     value: "{message}",
-                    border: "none",
-                    background: "none",
-                    padding: 0,
-                    height: "auto",
                     onmounted: move |cx| msg_input.set(Some(cx.data())),
-                    oninput: move |event| {
+                    oninput: move |event| async move {
                         message.set(event.value());
+                        document::eval(r#"let input = document.getElementById("main-msg-input");
+                            let height = input.scrollHeight;
+                            if (height > 300) {
+                                input.style = "height: 300px";
+                            } else {
+                                input.style = "height: " + height + "px";
+                            }"#).await.unwrap();
                     },
                     onkeydown: move |event| async move {
                         if event.code() != Code::Enter || event.modifiers().shift() {
@@ -497,7 +539,7 @@ fn GroupMessagesPanel(selected_group: MultiUserGroup, credentials: AccountCreden
                         }
                         event.prevent_default();
                         // TODO: Encryption.
-                        let content = (*message.read()).clone();
+                        let content = message();
                         let msg_bytes: Box<[u8]> = Box::from(content.clone().as_bytes());
                         println!("Send result: {:?}", server::send_group_message(
                             selected_group.id,
@@ -508,6 +550,8 @@ fn GroupMessagesPanel(selected_group: MultiUserGroup, credentials: AccountCreden
                         println!("Sending group message: {content:?}");
                         message.set(String::new());
                         group_messages_resource.restart();
+                        document::eval(r#"let input = document.getElementById("main-msg-input");
+                            input.style = "height: 36px";"#).await.unwrap();
                     }
                 }
             }
@@ -516,7 +560,14 @@ fn GroupMessagesPanel(selected_group: MultiUserGroup, credentials: AccountCreden
 }
 
 #[component]
-pub fn DmGroupPanel(group: DmGroup, user_id: u64, selected_dm_group: Signal<Option<DmGroup>>, selected_group: Signal<Option<MultiUserGroup>>) -> Element {
+#[allow(non_snake_case)]
+pub fn DmGroupPanel(
+    group: DmGroup,
+    user_id: u64,
+    selected_dm_group: Signal<Option<DmGroup>>,
+    selected_group: Signal<Option<MultiUserGroup>>,
+    credentials: AccountCredentials,
+) -> Element {
     const ICON_TRANSPARENT: Asset = asset!(
         "/assets/icon_transparent.png",
         ImageAssetOptions::new()
@@ -527,16 +578,31 @@ pub fn DmGroupPanel(group: DmGroup, user_id: u64, selected_dm_group: Signal<Opti
             .with_format(ImageFormat::Avif)
     );
 
-    // TODO: Store the title in `Storage` and then load it.
-    let title = group.id.to_string();
-    // TODO: Make `identify_user(id: u64)` function which will check for client-overriden (or at
-    // least cached) data in `Storage` and if it doesn't find it, it'll send a request to the
-    // server and store the result.
-    let subtitle = if group.initiator_id == user_id {
+    let mut contact_data = use_signal(|| PacketState::NotStarted);
+    let contact_id = if group.initiator_id == user_id {
         group.other_id
     } else {
         group.initiator_id
-    }.to_string();
+    };
+    use_future(move || async move {
+        CACHE
+            .user_data(contact_id, credentials, &mut contact_data)
+            .await;
+    });
+    let subtitle = match contact_data() {
+        PacketState::Response(data) => {
+            data.map_or(format!("[Deleted account {contact_id}]"), |data| {
+                data.username.unwrap_or(
+                    data.email
+                        .unwrap_or(format!("[Anonymous user {contact_id}]")),
+                )
+            })
+        }
+        _ => format!("[Account {contact_id}]"),
+    };
+    // TODO: Store the title in `Storage` and then load it.
+    // let title = format!("[Group {}]", group.id);
+    let title = subtitle.clone();
     rsx! {
         div {
             class: "item-panel",
@@ -577,6 +643,7 @@ pub fn DmGroupPanel(group: DmGroup, user_id: u64, selected_dm_group: Signal<Opti
 }
 
 #[component]
+#[allow(non_snake_case)]
 fn DmMessageComponent(message: DmMessage) -> Element {
     rsx! {
         div {
@@ -593,7 +660,14 @@ fn DmMessageComponent(message: DmMessage) -> Element {
 }
 
 #[component]
-pub fn GroupPanel(group: MultiUserGroup, user_id: u64, selected_dm_group: Signal<Option<DmGroup>>, selected_group: Signal<Option<MultiUserGroup>>) -> Element {
+#[allow(non_snake_case)]
+pub fn GroupPanel(
+    group: MultiUserGroup,
+    user_id: u64,
+    selected_dm_group: Signal<Option<DmGroup>>,
+    selected_group: Signal<Option<MultiUserGroup>>,
+    credentials: AccountCredentials,
+) -> Element {
     const ICON_TRANSPARENT: Asset = asset!(
         "/assets/icon_transparent.png",
         ImageAssetOptions::new()
@@ -606,7 +680,17 @@ pub fn GroupPanel(group: MultiUserGroup, user_id: u64, selected_dm_group: Signal
 
     // TODO: Store the title in `Storage` and then load it (if overriden).
     let title = group.name.clone();
-    let subtitle = group.id.to_string();
+    let members_data = future_retry_loop!(server::get_group_member_count(group.id, credentials));
+    let subtitle = match members_data {
+        PacketState::Response(members) => {
+            if members == 1 {
+                "1 member".to_owned()
+            } else {
+                format!("{members} members")
+            }
+        }
+        _ => format!("[Group {}]", group.id),
+    };
     rsx! {
         div {
             class: "item-panel",
@@ -650,8 +734,39 @@ pub fn GroupPanel(group: MultiUserGroup, user_id: u64, selected_dm_group: Signal
 }
 
 #[component]
-fn GroupMessageComponent(message: GroupMessage, self_id: u64) -> Element {
+#[allow(non_snake_case)]
+fn GroupMessageComponent(
+    message: GroupMessage,
+    self_id: u64,
+    credentials: AccountCredentials,
+) -> Element {
+    let mut author_data = use_signal(|| PacketState::NotStarted);
+    let author_id = message.sender_id;
+    use_future(move || async move {
+        CACHE
+            .user_data(author_id, credentials, &mut author_data)
+            .await;
+    });
+    let author = match author_data() {
+        PacketState::Response(data) => {
+            rsx! {
+                h3 {
+                    margin_top: "12px",
+                    margin_bottom: "4px",
+                    {data.map_or(format!("[Deleted account {author_id}]"), |data| data.username.unwrap_or(data.email.unwrap_or(format!("[Anonymous user {author_id}]"))))}
+                }
+            }
+        }
+        _ => rsx! {
+            h3 {
+                margin_top: "12px",
+                margin_bottom: "4px",
+                "[Account {author_id}]"
+            }
+        },
+    };
     rsx! {
+        {author}
         div {
             class: {format!("message {}", if message.sender_id == self_id {
                 "msg-me"

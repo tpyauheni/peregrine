@@ -1,7 +1,4 @@
-use std::{
-    path::PathBuf,
-    sync::LazyLock,
-};
+use std::{path::PathBuf, sync::LazyLock};
 
 use platform_dirs::AppDirs;
 use server::AccountCredentials;

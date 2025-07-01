@@ -1,26 +1,24 @@
 use client::{future_retry_loop, packet_sender::PacketState};
 use dioxus::prelude::*;
-use server::{AccountCredentials};
+use server::AccountCredentials;
 use shared::types::GroupPermissions;
 
 #[component]
 pub fn OtherUserAccount(user_id: u64, credentials: AccountCredentials) -> Element {
     let user_data = future_retry_loop!(server::get_user_data(user_id, credentials));
     let user_info = match user_data {
-        PacketState::Response(info) => {
-            match info {
-                Some(info) => {
-                    let email = info.email.unwrap_or("Hidden email".to_owned());
-                    let username = info.username.unwrap_or("Hidden username".to_owned());
-                    rsx! {
-                        h4 { margin: 0, "Email: {email}" }
-                        h4 { margin: 0, "Username: {username}" }
-                        h4 { margin: 0, "Id: {user_id}" }
-                    }
+        PacketState::Response(info) => match info {
+            Some(info) => {
+                let email = info.email.unwrap_or("Hidden email".to_owned());
+                let username = info.username.unwrap_or("Hidden username".to_owned());
+                rsx! {
+                    h4 { margin: 0, "Email: {email}" }
+                    h4 { margin: 0, "Username: {username}" }
+                    h4 { margin: 0, "Id: {user_id}" }
                 }
-                None => rsx!("Removed account"),
             }
-        }
+            None => rsx!("Removed account"),
+        },
         PacketState::Waiting => rsx!("Loading user information..."),
         PacketState::ServerError(err) => rsx!("Server error: {err:?}"),
         PacketState::RequestTimeout => rsx!("Request timeout"),

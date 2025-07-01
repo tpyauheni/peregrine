@@ -1,14 +1,11 @@
-use std::{
-    path::PathBuf,
-    sync::LazyLock,
-};
+use std::{path::PathBuf, sync::LazyLock};
 
 use dioxus::signals::{Signal, Writable};
 use platform_dirs::AppDirs;
 use server::{AccountCredentials, MultiUserGroup, UserAccount};
 
-use crate::{future_retry_loop, packet_sender::{PacketSender, PacketState}};
-use shared::{storage::{GeneralStorage, RawStorage}, types::UserIcon};
+use crate::packet_sender::{PacketSender, PacketState};
+use shared::storage::{GeneralStorage, RawStorage};
 
 pub static FALLBACK_CACHE_PATH: LazyLock<PathBuf> = LazyLock::new(|| {
     let mut path = PathBuf::new();
@@ -56,7 +53,12 @@ impl CacheStorage {
         self.load(&format!("group{group_id}.bin"))
     }
 
-    pub async fn user_data(&self, user_id: u64, credentials: AccountCredentials, signal: &mut Signal<PacketState<Option<UserAccount>>>) {
+    pub async fn user_data(
+        &self,
+        user_id: u64,
+        credentials: AccountCredentials,
+        signal: &mut Signal<PacketState<Option<UserAccount>>>,
+    ) {
         if let Some(data) = self.load_user_data(user_id) {
             signal.set(PacketState::Response(Some(data)));
             return;
@@ -71,7 +73,12 @@ impl CacheStorage {
         }
     }
 
-    pub async fn group_data(&self, group_id: u64, credentials: AccountCredentials, signal: &mut Signal<PacketState<Option<MultiUserGroup>>>) {
+    pub async fn group_data(
+        &self,
+        group_id: u64,
+        credentials: AccountCredentials,
+        signal: &mut Signal<PacketState<Option<MultiUserGroup>>>,
+    ) {
         if let Some(data) = self.load_group_data(group_id) {
             signal.set(PacketState::Response(Some(data)));
             return;

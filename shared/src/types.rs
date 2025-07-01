@@ -48,7 +48,7 @@ impl GroupPermissions {
             send_messages: true,
             read_messages: true,
             invite_users: true,
-            custom_permissions: vec!["admin".to_owned()]
+            custom_permissions: vec!["admin".to_owned()],
         }
     }
 }

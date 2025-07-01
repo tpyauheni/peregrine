@@ -1,8 +1,14 @@
-use std::{error::Error, fmt::Debug, fs::{self, File}, io::{Read, Write}, path::{Path, PathBuf}};
+use std::{
+    error::Error,
+    fmt::Debug,
+    fs::{self, File},
+    io::{Read, Write},
+    path::{Path, PathBuf},
+};
 
 use atomic_write_file::AtomicWriteFile;
 use postcard::{from_bytes, to_allocvec};
-use serde::{de::DeserializeOwned, Serialize};
+use serde::{Serialize, de::DeserializeOwned};
 
 pub trait RawStorage {
     fn get_base_path(&self) -> &PathBuf;
@@ -50,7 +56,7 @@ pub trait RawStorage {
     }
 }
 
-pub trait GeneralStorage : RawStorage {
+pub trait GeneralStorage: RawStorage {
     fn store<P: AsRef<Path> + Debug>(&self, file_path: &P, data: &impl Serialize) -> bool {
         if let Err(err) = self.raw_store(file_path, data) {
             eprintln!("Unexpected error while trying to store data to file {file_path:?}: {err:?}");

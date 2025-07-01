@@ -1,9 +1,6 @@
-use std::{
-    path::PathBuf,
-    sync::LazyLock,
-};
+use std::{path::PathBuf, sync::LazyLock};
 
-use shared::{storage::{GeneralStorage, RawStorage}, types::UserIcon};
+use shared::storage::{GeneralStorage, RawStorage};
 
 pub static STORAGE_PATH: LazyLock<PathBuf> = LazyLock::new(|| {
     let mut path = PathBuf::new();

@@ -146,6 +146,8 @@ a:focus {
 
 .twopanel-right {
     background-color: #161b1f;
+    word-wrap: break-word;
+    max-width: min(70vw, calc(100vw - 400px));
 }
 
 .item-panel {
@@ -185,4 +187,12 @@ a:focus {
 
 .msg-other {
     background-color: #21272a;
+}
+
+.msg-textbox {
+    resize: none;
+    border: none;
+    background: none;
+    padding: 0;
+    height: auto;
 }

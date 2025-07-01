@@ -1,9 +1,12 @@
 use dioxus::{logger::tracing::Level, prelude::*};
 
 use server::AccountCredentials;
-use views::{Contacts, Home, Invites, LoginAccount, RegisterAccount, SessionValidityChecker, OtherUserAccount, CreateGroup};
 #[cfg(debug_assertions)]
 use views::ChangeCredentials;
+use views::{
+    Contacts, CreateGroup, Home, Invites, LoginAccount, OtherUserAccount, RegisterAccount,
+    SessionValidityChecker,
+};
 
 mod views;
 

@@ -1,9 +1,9 @@
+use base64::{Engine, engine::general_purpose::STANDARD};
 use dioxus::prelude::*;
-use base64::{engine::general_purpose::STANDARD, Engine};
 
-use server::{AccountCredentials};
-use client::storage::STORAGE;
 use crate::Route;
+use client::storage::STORAGE;
+use server::AccountCredentials;
 
 #[component]
 pub fn ChangeCredentials(credentials: AccountCredentials) -> Element {

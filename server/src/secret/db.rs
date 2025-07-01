@@ -1,4 +1,4 @@
-use crate::{Account, DmInvite, DmMessage, DmGroup, GroupMessage, GroupInvite, MultiUserGroup};
+use crate::{Account, DmGroup, DmInvite, DmMessage, GroupInvite, GroupMessage, MultiUserGroup};
 
 use std::sync::{Arc, LazyLock, Mutex};
 
@@ -460,10 +460,7 @@ impl Database {
         }))
     }
 
-    pub fn get_dm_groups(
-        &self,
-        account_id: u64,
-    ) -> DbResult<Vec<DmGroup>> {
+    pub fn get_dm_groups(&self, account_id: u64) -> DbResult<Vec<DmGroup>> {
         let mut conn = self.pool.get_conn()?;
         let value = conn.exec_map(
             r"SELECT
@@ -477,12 +474,7 @@ impl Database {
                 ORDER BY `id` DESC
                 LIMIT 30;",
             (account_id, account_id),
-            |(
-                id,
-                encrypted_bytes,
-                initiator_id,
-                other_id,
-            )| {
+            |(id, encrypted_bytes, initiator_id, other_id)| {
                 let _: Box<[u8]> = encrypted_bytes;
                 DmGroup {
                     id,
@@ -656,14 +648,12 @@ impl Database {
                 ORDER BY `id` DESC
                 LIMIT 30;",
             (id,),
-            |(id, inviter_id, invited_id, group_id, permissions)| {
-                GroupInvite {
-                    id,
-                    inviter_id,
-                    invited_id,
-                    group_id,
-                    permissions,
-                }
+            |(id, inviter_id, invited_id, group_id, permissions)| GroupInvite {
+                id,
+                inviter_id,
+                invited_id,
+                group_id,
+                permissions,
             },
         )?;
         Ok(value)
@@ -679,14 +669,12 @@ impl Database {
                 ORDER BY `id` DESC
                 LIMIT 30;",
             (id,),
-            |(id, inviter_id, invited_id, group_id, permissions)| {
-                GroupInvite {
-                    id,
-                    inviter_id,
-                    invited_id,
-                    group_id,
-                    permissions,
-                }
+            |(id, inviter_id, invited_id, group_id, permissions)| GroupInvite {
+                id,
+                inviter_id,
+                invited_id,
+                group_id,
+                permissions,
             },
         )?;
         Ok(value)
@@ -701,10 +689,7 @@ impl Database {
         )?)
     }
 
-    pub fn get_group_ids(
-        &self,
-        account_id: u64,
-    ) -> DbResult<Vec<u64>> {
+    pub fn get_group_ids(&self, account_id: u64) -> DbResult<Vec<u64>> {
         let mut conn = self.pool.get_conn()?;
         let group_ids: Vec<u64> = conn.exec_map(
             r"SELECT
@@ -714,17 +699,12 @@ impl Database {
                 ORDER BY `group_id` DESC
                 LIMIT 30;",
             (account_id,),
-            |group_id| {
-                group_id
-            },
+            |group_id| group_id,
         )?;
         Ok(group_ids)
     }
 
-    pub fn get_group_by_id(
-        &self,
-        group_id: u64,
-    ) -> DbResult<Option<MultiUserGroup>> {
+    pub fn get_group_by_id(&self, group_id: u64) -> DbResult<Option<MultiUserGroup>> {
         let mut conn = self.pool.get_conn()?;
         let Some(mut group) = conn.exec_first(
             r"SELECT
@@ -732,7 +712,8 @@ impl Database {
                 FROM `groups`
                 WHERE `id` = ?;",
             (group_id,),
-        )? else {
+        )?
+        else {
             return Ok(None);
         };
         let _: Row = group;
@@ -763,7 +744,12 @@ impl Database {
         Ok(groups)
     }
 
-    pub fn add_group_member(&self, group_id: u64, user_id: u64, permissions: &[u8]) -> DbResult<()> {
+    pub fn add_group_member(
+        &self,
+        group_id: u64,
+        user_id: u64,
+        permissions: &[u8],
+    ) -> DbResult<()> {
         let mut conn = self.pool.get_conn()?;
         conn.exec_drop(
             r"INSERT INTO `group_members` (
@@ -774,6 +760,16 @@ impl Database {
             (group_id, user_id, permissions),
         )?;
         Ok(())
+    }
+
+    pub fn get_group_member_count(&self, group_id: u64) -> DbResult<Option<u64>> {
+        let mut conn = self.pool.get_conn()?;
+        let value = conn.exec_first(
+            r"SELECT COUNT(*) FROM `group_members`
+            WHERE `group_id` = ?;",
+            (group_id,),
+        )?;
+        Ok(value)
     }
 
     pub fn reset(&self) -> DbResult<()> {
@@ -814,7 +810,7 @@ pub mod rng {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{LazyLock, Once, Mutex};
+    use std::sync::{LazyLock, Mutex, Once};
 
     use crate::{DmInvite, secret::db::Account};
 
@@ -1109,7 +1105,9 @@ mod tests {
             assert!(DB.get_groups(2).unwrap().is_empty());
             assert!(DB.get_groups(3).unwrap().is_empty());
             assert!(DB.get_groups(4).unwrap().is_empty());
-            let group1 = DB.create_group("Some public group", false, true, false).unwrap();
+            let group1 = DB
+                .create_group("Some public group", false, true, false)
+                .unwrap();
             assert!(DB.get_groups(1).unwrap().is_empty());
             assert_eq!(group1, 1);
             DB.add_group_member(group1, 1, &[0xFF]).unwrap();

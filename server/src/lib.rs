@@ -1,5 +1,5 @@
 #[cfg(feature = "server")]
-mod secret;
+pub mod secret;
 
 use std::{fmt::Display, str::FromStr};
 
@@ -9,6 +9,7 @@ use chrono::{DateTime, TimeDelta, Utc};
 use dioxus::logger::tracing::{debug, error, info};
 use dioxus::prelude::*;
 use serde::{Deserialize, Serialize};
+use shared::crypto::PublicKey;
 #[cfg(feature = "server")]
 use shared::limits::LIMITS;
 use shared::types::{GroupPermissions, UserIcon};
@@ -22,30 +23,22 @@ use shared::storage::{GeneralStorage, RawStorage};
 
 #[derive(Debug, PartialEq, Clone, Copy)]
 pub enum ServerError {
-    CreateAccountDatabaseError,
-    CreateSessionDatabaseError,
-    FindUserDatabaseError,
+    InternalDatabaseError,
     InvalidSessionToken,
-    SendMessageDatabaseError,
-    VerificationDatabaseError,
     Forbidden,
-    FetchMessagesDatabaseError,
-    InviteDatabaseError,
     GroupPartiallyCreated(u64),
     InvalidArgumentSize,
     InvalidValue,
     InvalidUserId,
-    GroupDatabaseError,
     LimitExceeded,
     SignatureEarly,
     SignatureExpired,
     InvalidSignature,
     UnsupportedCryptographicAlgorithm,
     AccountNotFound,
-    LoginAccountDatabaseError,
-    GetUserDataDatabaseError,
     AlreadyInGroup,
     GroupPartiallyJoined,
+    InvalidGroupId,
 }
 
 impl FromStr for ServerError {
@@ -53,29 +46,21 @@ impl FromStr for ServerError {
 
     fn from_str(s: &str) -> Result<Self, Self::Err> {
         match s {
-            "CreateAccountDatabaseError" => Ok(Self::CreateAccountDatabaseError),
-            "CreateSessionDatabaseError" => Ok(Self::CreateSessionDatabaseError),
-            "FindUserDatabaseError" => Ok(Self::FindUserDatabaseError),
+            "InternalDatabaseError" => Ok(Self::InternalDatabaseError),
             "InvalidSessionToken" => Ok(Self::InvalidSessionToken),
-            "SendMessageDatabaseError" => Ok(Self::SendMessageDatabaseError),
-            "VerificationDatabaseError" => Ok(Self::VerificationDatabaseError),
             "Forbidden" => Ok(Self::Forbidden),
-            "FetchMessagesDatabaseError" => Ok(Self::FetchMessagesDatabaseError),
-            "InviteDatabaseError" => Ok(Self::InviteDatabaseError),
             "InvalidArgumentSize" => Ok(Self::InvalidArgumentSize),
             "InvalidValue" => Ok(Self::InvalidValue),
             "InvalidUserId" => Ok(Self::InvalidUserId),
-            "GroupDatabaseError" => Ok(Self::GroupDatabaseError),
             "LimitExceeded" => Ok(Self::LimitExceeded),
             "SignatureEarly" => Ok(Self::SignatureEarly),
             "SignatureExpired" => Ok(Self::SignatureExpired),
             "InvalidSignature" => Ok(Self::InvalidSignature),
             "UnsupportedCryptographicAlgorithm" => Ok(Self::UnsupportedCryptographicAlgorithm),
             "AccountNotFound" => Ok(Self::AccountNotFound),
-            "LoginAccountDatabaseError" => Ok(Self::LoginAccountDatabaseError),
-            "GetUserDataDatabaseError" => Ok(Self::GetUserDataDatabaseError),
             "AlreadyInGroup" => Ok(Self::AlreadyInGroup),
             "GroupPartiallyJoined" => Ok(Self::GroupPartiallyJoined),
+            "InvalidGroupId" => Ok(Self::InvalidGroupId),
             _ => {
                 let Some(s_split) = s.split_once(':') else {
                     return Err(());
@@ -96,20 +81,13 @@ impl FromStr for ServerError {
 impl Display for ServerError {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         f.write_str(&match *self {
-            Self::CreateAccountDatabaseError => "CreateAccountDatabaseError".to_owned(),
-            Self::CreateSessionDatabaseError => "CreateSessionDatabaseError".to_owned(),
-            Self::FindUserDatabaseError => "FindUserDatabaseError".to_owned(),
+            Self::InternalDatabaseError => "InternalDatabaseError".to_owned(),
             Self::InvalidSessionToken => "InvalidSessionToken".to_owned(),
-            Self::SendMessageDatabaseError => "SendMessageDatabaseError".to_owned(),
-            Self::VerificationDatabaseError => "VerificationDatabaseError".to_owned(),
             Self::Forbidden => "Forbidden".to_owned(),
-            Self::FetchMessagesDatabaseError => "FetchMessagesDatabaseError".to_owned(),
-            Self::InviteDatabaseError => "InviteDatabaseError".to_owned(),
             Self::GroupPartiallyCreated(id) => format!("GroupPartiallyCreated:{id}"),
             Self::InvalidArgumentSize => "InvalidArgumentSize".to_owned(),
             Self::InvalidValue => "InvalidValue".to_owned(),
             Self::InvalidUserId => "InvalidUserId".to_owned(),
-            Self::GroupDatabaseError => "GroupDatabaseError".to_owned(),
             Self::LimitExceeded => "LimitExceeded".to_owned(),
             Self::SignatureEarly => "SignatureEarly".to_owned(),
             Self::SignatureExpired => "SignatureExpired".to_owned(),
@@ -118,10 +96,9 @@ impl Display for ServerError {
                 "UnsupportedCryptographicAlgorithm".to_owned()
             }
             Self::AccountNotFound => "AccountNotFound".to_owned(),
-            Self::LoginAccountDatabaseError => "LoginAccountDatabaseError".to_owned(),
-            Self::GetUserDataDatabaseError => "GetUserDataDatabaseError".to_owned(),
             Self::AlreadyInGroup => "AlreadyInGroup".to_owned(),
             Self::GroupPartiallyJoined => "GroupPartiallyJoined".to_owned(),
+            Self::InvalidGroupId => "InvalidGroupId".to_owned(),
         })?;
         Ok(())
     }
@@ -301,7 +278,7 @@ pub async fn create_account(
                 Err(err) => {
                     error!("Failed to create session: {err:?}");
                     Err(ServerFnError::WrappedServerError(
-                        ServerError::CreateSessionDatabaseError,
+                        ServerError::InternalDatabaseError,
                     ))
                 }
             }
@@ -309,7 +286,7 @@ pub async fn create_account(
         Err(err) => {
             error!("Failed to create account: {err:?}");
             Err(ServerFnError::WrappedServerError(
-                ServerError::CreateAccountDatabaseError,
+                ServerError::InternalDatabaseError,
             ))
         }
     }
@@ -366,8 +343,14 @@ pub async fn login_account(
 
     let data = &session_params.to_boxed_slice();
 
-    let Some(result) = shared::crypto::verify(&login_algorithm, &public_key, data, &signature)
-    else {
+    let Some(result) = shared::crypto::verify(
+        &login_algorithm,
+        PublicKey {
+            pk: public_key.clone(),
+        },
+        data,
+        &signature,
+    ) else {
         return Err(ServerFnError::WrappedServerError(
             ServerError::UnsupportedCryptographicAlgorithm,
         ));
@@ -390,7 +373,7 @@ pub async fn login_account(
         Err(err) => {
             error!("Failed to check if user has pubkey while loggin into account: {err:?}");
             return Err(ServerFnError::WrappedServerError(
-                ServerError::LoginAccountDatabaseError,
+                ServerError::InternalDatabaseError,
             ));
         }
     }
@@ -407,7 +390,7 @@ pub async fn login_account(
         Err(err) => {
             error!("Failed to create login session: {err:?}");
             Err(ServerFnError::WrappedServerError(
-                ServerError::CreateSessionDatabaseError,
+                ServerError::InternalDatabaseError,
             ))
         }
     }
@@ -477,7 +460,9 @@ pub async fn find_user(
     credentials: AccountCredentials,
 ) -> Result<Vec<FoundAccount>, ServerFnError<ServerError>> {
     if query.is_empty() {
-        return Err(ServerFnError::WrappedServerError(ServerError::InvalidArgumentSize));
+        return Err(ServerFnError::WrappedServerError(
+            ServerError::InvalidArgumentSize,
+        ));
     }
 
     if query.len() > LIMITS.max_email_length.max(LIMITS.max_username_length) {
@@ -507,7 +492,7 @@ pub async fn find_user(
         Err(err) => {
             error!("Failed to find user: {err:?}");
             Err(ServerFnError::WrappedServerError(
-                ServerError::FindUserDatabaseError,
+                ServerError::InternalDatabaseError,
             ))
         }
     }
@@ -526,7 +511,7 @@ pub fn check_is_in_dm_group(user_id: u64, group_id: u64) -> Result<(), ServerFnE
         Err(err) => {
             error!("Failed to check whether the user is in DM group or not: {err:?}");
             Err(ServerFnError::WrappedServerError(
-                ServerError::VerificationDatabaseError,
+                ServerError::InternalDatabaseError,
             ))
         }
     }
@@ -559,7 +544,7 @@ pub async fn send_dm_message(
         Err(err) => {
             error!("Failed to send DM message: {err:?}");
             Err(ServerFnError::WrappedServerError(
-                ServerError::SendMessageDatabaseError,
+                ServerError::InternalDatabaseError,
             ))
         }
     }
@@ -579,7 +564,7 @@ pub async fn fetch_new_dm_messages(
         Err(err) => {
             error!("Failed to fetch new DM messages: {err:?}");
             Err(ServerFnError::WrappedServerError(
-                ServerError::FetchMessagesDatabaseError,
+                ServerError::InternalDatabaseError,
             ))
         }
     }
@@ -603,7 +588,7 @@ pub async fn send_dm_invite(
         Err(err) => {
             error!("Failed to send DM invite: {err:?}");
             Err(ServerFnError::WrappedServerError(
-                ServerError::InviteDatabaseError,
+                ServerError::InternalDatabaseError,
             ))
         }
     }
@@ -621,7 +606,7 @@ pub async fn accept_dm_invite(
         Err(err) => {
             error!("Failed to get DM invite while trying to accept: {err:?}");
             return Err(ServerFnError::WrappedServerError(
-                ServerError::InviteDatabaseError,
+                ServerError::InternalDatabaseError,
             ));
         }
     };
@@ -636,7 +621,7 @@ pub async fn accept_dm_invite(
         Err(err) => {
             error!("Failed to create DM group while trying to accept invite: {err:?}");
             return Err(ServerFnError::WrappedServerError(
-                ServerError::InviteDatabaseError,
+                ServerError::InternalDatabaseError,
             ));
         }
     };
@@ -664,7 +649,7 @@ pub async fn reject_dm_invite(
         Err(err) => {
             error!("Failed to get DM invite while trying to reject: {err:?}");
             return Err(ServerFnError::WrappedServerError(
-                ServerError::InviteDatabaseError,
+                ServerError::InternalDatabaseError,
             ));
         }
     };
@@ -678,7 +663,7 @@ pub async fn reject_dm_invite(
         Err(err) => {
             error!("Failed to reject DM invite: {err:?}");
             Err(ServerFnError::WrappedServerError(
-                ServerError::InviteDatabaseError,
+                ServerError::InternalDatabaseError,
             ))
         }
     }
@@ -695,7 +680,7 @@ pub async fn get_sent_dm_invites(
         Err(err) => {
             error!("Failed to get sent DM invites: {err:?}");
             Err(ServerFnError::WrappedServerError(
-                ServerError::InviteDatabaseError,
+                ServerError::InternalDatabaseError,
             ))
         }
     }
@@ -712,7 +697,7 @@ pub async fn get_received_dm_invites(
         Err(err) => {
             error!("Failed to get received DM invites: {err:?}");
             Err(ServerFnError::WrappedServerError(
-                ServerError::InviteDatabaseError,
+                ServerError::InternalDatabaseError,
             ))
         }
     }
@@ -730,7 +715,7 @@ pub async fn cancel_dm_invite(
         Err(err) => {
             error!("Failed to get DM invite while trying to reject: {err:?}");
             return Err(ServerFnError::WrappedServerError(
-                ServerError::InviteDatabaseError,
+                ServerError::InternalDatabaseError,
             ));
         }
     };
@@ -744,7 +729,7 @@ pub async fn cancel_dm_invite(
         Err(err) => {
             error!("Failed to cancel DM invite: {err:?}");
             Err(ServerFnError::WrappedServerError(
-                ServerError::InviteDatabaseError,
+                ServerError::InternalDatabaseError,
             ))
         }
     }
@@ -763,7 +748,7 @@ pub async fn leave_dm_group(
         Err(err) => {
             error!("Failed to leave DM group: {err:?}");
             Err(ServerFnError::WrappedServerError(
-                ServerError::GroupDatabaseError,
+                ServerError::InternalDatabaseError,
             ))
         }
     }
@@ -799,7 +784,7 @@ pub async fn get_user_data(
         Err(err) => {
             eprintln!("Failed to get user by id {user_id}: {err:?}");
             Err(ServerFnError::WrappedServerError(
-                ServerError::GetUserDataDatabaseError,
+                ServerError::InternalDatabaseError,
             ))
         }
     }
@@ -816,7 +801,9 @@ pub async fn get_group_data(
 
     match DB.get_group_by_id(group_id) {
         Ok(Some(mut group)) => {
-            if let Err(err) = err && !group.public {
+            if let Err(err) = err
+                && !group.public
+            {
                 return Err(err);
             }
 
@@ -825,13 +812,11 @@ pub async fn get_group_data(
 
             Ok(Some(group))
         }
-        Ok(None) => {
-            Err(ServerFnError::WrappedServerError(ServerError::Forbidden))
-        }
+        Ok(None) => Err(ServerFnError::WrappedServerError(ServerError::Forbidden)),
         Err(err) => {
             eprintln!("Failed to get group data by id {group_id}: {err:?}");
             Err(ServerFnError::WrappedServerError(
-                ServerError::GroupDatabaseError,
+                ServerError::InternalDatabaseError,
             ))
         }
     }
@@ -846,9 +831,12 @@ pub async fn get_joined_dm_groups(
     match DB.get_dm_groups(credentials.id) {
         Ok(groups) => Ok(groups),
         Err(err) => {
-            error!("Failed to get joined DM groups of user {}: {err:?}", credentials.id);
+            error!(
+                "Failed to get joined DM groups of user {}: {err:?}",
+                credentials.id
+            );
             Err(ServerFnError::WrappedServerError(
-                    ServerError::GroupDatabaseError,
+                ServerError::InternalDatabaseError,
             ))
         }
     }
@@ -863,9 +851,12 @@ pub async fn get_joined_groups(
     match DB.get_groups(credentials.id) {
         Ok(groups) => Ok(groups),
         Err(err) => {
-            error!("Failed to get joined multi-user groups of user {}: {err:?}", credentials.id);
+            error!(
+                "Failed to get joined multi-user groups of user {}: {err:?}",
+                credentials.id
+            );
             Err(ServerFnError::WrappedServerError(
-                    ServerError::GroupDatabaseError,
+                ServerError::InternalDatabaseError,
             ))
         }
     }
@@ -884,18 +875,23 @@ pub fn check_is_in_group(user_id: u64, group_id: u64) -> Result<(), ServerFnErro
         Err(err) => {
             error!("Failed to check whether the user is in group or not: {err:?}");
             Err(ServerFnError::WrappedServerError(
-                ServerError::VerificationDatabaseError,
+                ServerError::InternalDatabaseError,
             ))
         }
     }
 }
 
 #[cfg(feature = "server")]
-pub fn check_is_not_in_group(user_id: u64, group_id: u64) -> Result<(), ServerFnError<ServerError>> {
+pub fn check_is_not_in_group(
+    user_id: u64,
+    group_id: u64,
+) -> Result<(), ServerFnError<ServerError>> {
     match DB.is_in_group(user_id, group_id) {
         Ok(value) => {
             if value {
-                Err(ServerFnError::WrappedServerError(ServerError::AlreadyInGroup))
+                Err(ServerFnError::WrappedServerError(
+                    ServerError::AlreadyInGroup,
+                ))
             } else {
                 Ok(())
             }
@@ -903,7 +899,7 @@ pub fn check_is_not_in_group(user_id: u64, group_id: u64) -> Result<(), ServerFn
         Err(err) => {
             error!("Failed to check whether the user is in group or not: {err:?}");
             Err(ServerFnError::WrappedServerError(
-                ServerError::VerificationDatabaseError,
+                ServerError::InternalDatabaseError,
             ))
         }
     }
@@ -925,7 +921,7 @@ pub async fn send_group_invite(
         Err(err) => {
             error!("Failed to send group invite to user {user_id}: {err:?}");
             Err(ServerFnError::WrappedServerError(
-                ServerError::GroupDatabaseError,
+                ServerError::InternalDatabaseError,
             ))
         }
     }
@@ -942,15 +938,21 @@ pub async fn create_group(
 ) -> Result<u64, ServerFnError<ServerError>> {
     check_session(credentials)?;
 
-    if let Some(icon) = icon.as_ref() && icon.len() > LIMITS.max_group_icon_size {
-        return Err(ServerFnError::WrappedServerError(ServerError::LimitExceeded));
+    if let Some(icon) = icon.as_ref()
+        && icon.len() > LIMITS.max_group_icon_size
+    {
+        return Err(ServerFnError::WrappedServerError(
+            ServerError::LimitExceeded,
+        ));
     }
 
     let group_id = match DB.create_group(&name, encrypted, public, channel) {
         Ok(group_id) => group_id,
         Err(err) => {
             error!("Failed to create a new group: {err:?}");
-            return Err(ServerFnError::WrappedServerError(ServerError::GroupDatabaseError));
+            return Err(ServerFnError::WrappedServerError(
+                ServerError::InternalDatabaseError,
+            ));
         }
     };
 
@@ -958,11 +960,17 @@ pub async fn create_group(
         store_icon("g", group_id, icon);
     }
 
-    match DB.add_group_member(group_id, credentials.id, &GroupPermissions::admin().to_bytes()) {
+    match DB.add_group_member(
+        group_id,
+        credentials.id,
+        &GroupPermissions::admin().to_bytes(),
+    ) {
         Ok(()) => Ok(group_id),
         Err(err) => {
             error!("Failed to add user creator to its group: {err:?}");
-            Err(ServerFnError::WrappedServerError(ServerError::GroupPartiallyCreated(group_id)))
+            Err(ServerFnError::WrappedServerError(
+                ServerError::GroupPartiallyCreated(group_id),
+            ))
         }
     }
 }
@@ -981,7 +989,7 @@ pub async fn fetch_new_group_messages(
         Err(err) => {
             error!("Failed to fetch new group messages: {err:?}");
             Err(ServerFnError::WrappedServerError(
-                ServerError::FetchMessagesDatabaseError,
+                ServerError::InternalDatabaseError,
             ))
         }
     }
@@ -1014,7 +1022,7 @@ pub async fn send_group_message(
         Err(err) => {
             error!("Failed to send group message: {err:?}");
             Err(ServerFnError::WrappedServerError(
-                ServerError::SendMessageDatabaseError,
+                ServerError::InternalDatabaseError,
             ))
         }
     }
@@ -1031,7 +1039,7 @@ pub async fn get_sent_group_invites(
         Err(err) => {
             error!("Failed to get sent group invites: {err:?}");
             Err(ServerFnError::WrappedServerError(
-                ServerError::InviteDatabaseError,
+                ServerError::InternalDatabaseError,
             ))
         }
     }
@@ -1048,7 +1056,7 @@ pub async fn get_received_group_invites(
         Err(err) => {
             error!("Failed to get received group invites: {err:?}");
             Err(ServerFnError::WrappedServerError(
-                ServerError::InviteDatabaseError,
+                ServerError::InternalDatabaseError,
             ))
         }
     }
@@ -1066,7 +1074,7 @@ pub async fn cancel_group_invite(
         Err(err) => {
             error!("Failed to get group invite while trying to reject: {err:?}");
             return Err(ServerFnError::WrappedServerError(
-                ServerError::InviteDatabaseError,
+                ServerError::InternalDatabaseError,
             ));
         }
     };
@@ -1080,7 +1088,7 @@ pub async fn cancel_group_invite(
         Err(err) => {
             error!("Failed to cancel group invite: {err:?}");
             Err(ServerFnError::WrappedServerError(
-                ServerError::InviteDatabaseError,
+                ServerError::InternalDatabaseError,
             ))
         }
     }
@@ -1098,7 +1106,7 @@ pub async fn accept_group_invite(
         Err(err) => {
             error!("Failed to get group invite while trying to accept: {err:?}");
             return Err(ServerFnError::WrappedServerError(
-                ServerError::InviteDatabaseError,
+                ServerError::InternalDatabaseError,
             ));
         }
     };
@@ -1107,12 +1115,16 @@ pub async fn accept_group_invite(
         return Err(ServerFnError::WrappedServerError(ServerError::Forbidden));
     }
 
-    match DB.add_group_member(invite.group_id, invite.invited_id, &GroupPermissions::default().to_bytes()) {
+    match DB.add_group_member(
+        invite.group_id,
+        invite.invited_id,
+        &GroupPermissions::default().to_bytes(),
+    ) {
         Ok(id) => id,
         Err(err) => {
             error!("Failed to create group while trying to accept invite: {err:?}");
             return Err(ServerFnError::WrappedServerError(
-                ServerError::InviteDatabaseError,
+                ServerError::InternalDatabaseError,
             ));
         }
     };
@@ -1140,7 +1152,7 @@ pub async fn reject_group_invite(
         Err(err) => {
             error!("Failed to get group invite while trying to reject: {err:?}");
             return Err(ServerFnError::WrappedServerError(
-                ServerError::InviteDatabaseError,
+                ServerError::InternalDatabaseError,
             ));
         }
     };
@@ -1154,7 +1166,31 @@ pub async fn reject_group_invite(
         Err(err) => {
             error!("Failed to reject group invite: {err:?}");
             Err(ServerFnError::WrappedServerError(
-                ServerError::InviteDatabaseError,
+                ServerError::InternalDatabaseError,
+            ))
+        }
+    }
+}
+
+#[server]
+pub async fn get_group_member_count(
+    group_id: u64,
+    credentials: AccountCredentials,
+) -> Result<u64, ServerFnError<ServerError>> {
+    check_session(credentials)?;
+    check_is_in_group(credentials.id, group_id)?;
+
+    match DB.get_group_member_count(group_id) {
+        Ok(Some(member_count)) => Ok(member_count),
+        // In theory it's possible that `check_is_in_group` will return `Ok`-value then the group
+        // will be removed and after that `DB.get_group_member_count` will be called.
+        Ok(None) => Err(ServerFnError::WrappedServerError(
+            ServerError::InvalidGroupId,
+        )),
+        Err(err) => {
+            error!("Failed to get group member count: {err:?}");
+            Err(ServerFnError::WrappedServerError(
+                ServerError::InternalDatabaseError,
             ))
         }
     }
