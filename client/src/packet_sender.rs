@@ -6,7 +6,7 @@ use dioxus::{
 };
 use server::ServerError;
 
-#[derive(PartialEq)]
+#[derive(Debug, PartialEq)]
 pub enum PacketState<T> {
     Response(T),
     Waiting,
@@ -79,6 +79,28 @@ impl PacketSender {
             }
 
             signal.set(state);
+            tokio::time::sleep(self.retry_interval).await;
+        }
+    }
+
+    pub async fn retry_loop_vec<T, F>(
+        &mut self,
+        mut func: impl FnMut() -> F,
+        signal: &mut Signal<Vec<PacketState<T>>>,
+        index: usize,
+    ) where
+        F: Future<Output = Result<T, ServerFnError<ServerError>>>,
+    {
+        let mut retry_after: bool = true;
+        while retry_after {
+            signal.write()[index] = PacketState::Waiting;
+
+            let retry_state = self.retry(func()).await;
+            if matches!(retry_state, PacketState::Response(_)) {
+                retry_after = false;
+            }
+
+            signal.write()[index] = retry_state;
             tokio::time::sleep(self.retry_interval).await;
         }
     }

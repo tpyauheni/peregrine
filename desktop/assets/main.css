@@ -176,9 +176,8 @@ a:focus {
     padding: 12px 20px;
     font-size: 14px;
     margin-bottom: 4px;
-    max-width: calc(max(200px, 40%));
+    max-width: calc(min(100vw - max(30vw, 400px) - 20px - 16px - 20px - 16px, 700px));
     word-wrap: break-word;
-    /* width: calc(min(500px, auto)); */
 }
 
 .msg-me {
@@ -195,4 +194,11 @@ a:focus {
     background: none;
     padding: 0;
     height: auto;
+}
+
+.imitate-button {
+    cursor: pointer;
+}
+.imitate-button:hover {
+    background-color: #1c1f24;
 }

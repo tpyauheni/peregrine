@@ -1,11 +1,11 @@
-use crate::{Account, DmGroup, DmInvite, DmMessage, GroupInvite, GroupMessage, MultiUserGroup};
+use crate::{Account, DmGroup, DmInvite, DmMessage, GroupInvite, GroupMessage, MultiUserGroup, GroupMember};
 
 use std::sync::{Arc, LazyLock, Mutex};
 
 use mysql::prelude::*;
 use mysql::{Pool, Row, params};
 use rand::{SeedableRng, rngs::StdRng};
-use shared::limits::LIMITS;
+use shared::{limits::LIMITS, types::GroupPermissions};
 
 #[derive(Debug, Clone)]
 pub struct Database {
@@ -768,6 +768,23 @@ impl Database {
             r"SELECT COUNT(*) FROM `group_members`
             WHERE `group_id` = ?;",
             (group_id,),
+        )?;
+        Ok(value)
+    }
+
+    pub fn get_group_members(&self, group_id: u64) -> DbResult<Vec<GroupMember>> {
+        let mut conn = self.pool.get_conn()?;
+        let value: Vec<GroupMember> = conn.exec_map(
+            r"SELECT `user_id`, `permissions` FROM `group_members`
+            WHERE `group_id` = ?;",
+            (group_id,),
+            |(user_id, permissions)| {
+                let _: Box<[u8]> = permissions;
+                GroupMember {
+                    user_id,
+                    is_admin: GroupPermissions::from_bytes(&permissions).is_admin(),
+                }
+            },
         )?;
         Ok(value)
     }

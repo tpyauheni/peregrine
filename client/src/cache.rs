@@ -73,6 +73,27 @@ impl CacheStorage {
         }
     }
 
+    pub async fn user_data_vec(
+        &self,
+        user_id: u64,
+        credentials: AccountCredentials,
+        signal: &mut Signal<Vec<PacketState<Option<UserAccount>>>>,
+        index: usize,
+    ) {
+        if let Some(data) = self.load_user_data(user_id) {
+            signal.write()[index] = PacketState::Response(Some(data));
+            return;
+        }
+
+        PacketSender::default()
+            .retry_loop_vec(|| server::get_user_data(user_id, credentials), signal, index)
+            .await;
+
+        if let PacketState::Response(Some(ref data)) = signal()[index] {
+            self.store_user_data(user_id, data);
+        }
+    }
+
     pub async fn group_data(
         &self,
         group_id: u64,

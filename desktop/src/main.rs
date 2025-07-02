@@ -5,7 +5,7 @@ use server::AccountCredentials;
 use views::ChangeCredentials;
 use views::{
     Contacts, CreateGroup, Home, Invites, LoginAccount, OtherUserAccount, RegisterAccount,
-    SessionValidityChecker,
+    SessionValidityChecker, GroupMenu,
 };
 
 mod views;
@@ -36,6 +36,8 @@ pub enum Route {
     #[cfg(debug_assertions)]
     #[route("/debug/change_credentials/:credentials")]
     ChangeCredentials { credentials: AccountCredentials },
+    #[route("/group?:group_id&:credentials")]
+    GroupMenu { group_id: u64, credentials: AccountCredentials },
 }
 
 const MAIN_CSS: Asset = asset!("/assets/main.css");

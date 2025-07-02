@@ -207,6 +207,12 @@ pub struct MultiUserGroup {
     pub channel: bool,
 }
 
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct GroupMember {
+    pub user_id: u64,
+    pub is_admin: bool,
+}
+
 impl FromStr for AccountCredentials {
     type Err = usize;
 
@@ -1189,6 +1195,25 @@ pub async fn get_group_member_count(
         )),
         Err(err) => {
             error!("Failed to get group member count: {err:?}");
+            Err(ServerFnError::WrappedServerError(
+                ServerError::InternalDatabaseError,
+            ))
+        }
+    }
+}
+
+#[server]
+pub async fn get_group_members(
+    group_id: u64,
+    credentials: AccountCredentials,
+) -> Result<Vec<GroupMember>, ServerFnError<ServerError>> {
+    check_session(credentials)?;
+    check_is_in_group(credentials.id, group_id)?;
+
+    match DB.get_group_members(group_id) {
+        Ok(members) => Ok(members),
+        Err(err) => {
+            error!("Failed to get group members: {err:?}");
             Err(ServerFnError::WrappedServerError(
                 ServerError::InternalDatabaseError,
             ))

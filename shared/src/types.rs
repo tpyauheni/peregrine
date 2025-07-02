@@ -43,6 +43,27 @@ impl GroupPermissions {
         bytes.into_boxed_slice()
     }
 
+    pub fn from_bytes(bytes: &[u8]) -> Self {
+        let general_permissions: u128 = u128::from_le_bytes(bytes[..16].try_into().unwrap());
+        let mut custom_permissions: Vec<String> = vec![];
+        let mut index = 16;
+
+        while index < bytes.len() {
+            let length = bytes[index] as usize;
+            index += 1;
+            let permission_name = &bytes[index..index + length];
+            custom_permissions.push(String::from_utf8_lossy(permission_name).to_string());
+            index += length;
+        }
+
+        Self {
+            send_messages: general_permissions & 1 != 0,
+            read_messages: general_permissions & 2 != 0,
+            invite_users: general_permissions & 4 != 0,
+            custom_permissions,
+        }
+    }
+
     pub fn admin() -> Self {
         Self {
             send_messages: true,
@@ -50,6 +71,10 @@ impl GroupPermissions {
             invite_users: true,
             custom_permissions: vec!["admin".to_owned()],
         }
+    }
+
+    pub fn is_admin(&self) -> bool {
+        self.custom_permissions.contains(&"admin".to_owned())
     }
 }
 

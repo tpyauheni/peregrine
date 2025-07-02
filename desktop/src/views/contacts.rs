@@ -1,7 +1,7 @@
 use std::{rc::Rc, time::Duration};
 
 use client::{cache::CACHE, future_retry_loop, packet_sender::PacketState};
-use dioxus::{html::geometry::euclid::Size2D, logger::tracing::error, prelude::*};
+use dioxus::{html::{geometry::euclid::Size2D, select}, logger::tracing::error, prelude::*};
 use server::{AccountCredentials, DmGroup, DmMessage, FoundAccount, GroupMessage, MultiUserGroup};
 
 use crate::Route;
@@ -229,6 +229,32 @@ fn DmMessagesPanel(selected_dm_group: DmGroup, credentials: AccountCredentials) 
     let sending_message: Signal<PacketState<u64>> = use_signal(|| PacketState::NotStarted);
     let mut cached_messages: Signal<Option<Vec<DmMessage>>> = use_signal(|| None);
 
+    let mut contact_data = use_signal(|| PacketState::NotStarted);
+    let contact_id = if selected_dm_group.initiator_id == credentials.id {
+        selected_dm_group.other_id
+    } else {
+        selected_dm_group.initiator_id
+    };
+    use_future(move || async move {
+        CACHE
+            .user_data(contact_id, credentials, &mut contact_data)
+            .await;
+    });
+    let subtitle = match contact_data() {
+        PacketState::Response(data) => {
+            data.map_or(format!("[Deleted account {contact_id}]"), |data| {
+                data.username.unwrap_or(
+                    data.email
+                        .unwrap_or(format!("[Anonymous user {contact_id}]")),
+                )
+            })
+        }
+        _ => format!("[Account {contact_id}]"),
+    };
+    // TODO: Store the title in `Storage` and then load it.
+    // let title = format!("[Group {}]", group.id);
+    let title = subtitle.clone();
+
     future_retry_loop! { dm_messages_signal, dm_messages_resource, server::fetch_new_dm_messages(selected_dm_group.id, 0, credentials) };
     use_effect(move || {
         if let PacketState::Response(mut messages) = dm_messages_signal() {
@@ -295,12 +321,24 @@ fn DmMessagesPanel(selected_dm_group: DmGroup, credentials: AccountCredentials) 
             max_height: "100vh",
 
             div {
+                class: "imitate-button",
                 width: "100%",
                 max_width: "calc(100% - 32px)",
-                height: "80px",
+                height: "56px",
+                min_height: "56px",
                 padding: "16px",
+                onclick: move |_| async move {
+                    let nav = navigator();
+                    nav.push(Route::OtherUserAccount { user_id: contact_id, credentials });
+                },
 
-                h1 { {format!("Group {}", selected_dm_group.id)} }
+                h1 {
+                    margin_top: "10px",
+                    margin_bottom: 0,
+                    margin_left: "16px",
+
+                    {title}
+                }
             }
             div {
                 width: "100%",
@@ -468,12 +506,24 @@ fn GroupMessagesPanel(selected_group: MultiUserGroup, credentials: AccountCreden
             max_height: "100vh",
 
             div {
+                class: "imitate-button",
                 width: "100%",
                 max_width: "calc(100% - 32px)",
-                height: "80px",
+                height: "56px",
+                min_height: "56px",
                 padding: "16px",
+                onclick: move |_| async move {
+                    let nav = navigator();
+                    nav.push(Route::GroupMenu { group_id: selected_group.id, credentials });
+                },
 
-                h1 { {format!("Group {:?}", selected_group.name)} }
+                h1 {
+                    margin_top: "10px",
+                    margin_bottom: 0,
+                    margin_left: "16px",
+
+                    {selected_group.name}
+                }
             }
             div {
                 width: "100%",
