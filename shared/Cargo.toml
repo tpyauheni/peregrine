@@ -10,7 +10,7 @@ postcard = { version = "1.1", features = ["use-std"] }
 atomic-write-file = "0.2"
 
 [dependencies.bee2-rs]
-git = "ssh://git@github.com/tpyauheni/bee2-rs.git"
+git = "https://github.com/tpyauheni/bee2-rs.git"
 version = "0.2.1"
 features = ["belt-ctr", "belt-hmac", "belt-pbkdf2", "bign", "bash-full", "belt-dwp"]
 optional = true
