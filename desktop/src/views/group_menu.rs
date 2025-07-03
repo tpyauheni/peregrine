@@ -1,10 +1,21 @@
-use client::{cache::CACHE, future_retry_loop, packet_sender::PacketState};
+use client::{
+    cache::CACHE,
+    future_retry_loop,
+    packet_sender::{PacketSender, PacketState},
+};
 use dioxus::prelude::*;
 
 use server::{AccountCredentials, GroupMember, MultiUserGroup, UserAccount};
 
 #[component]
-fn User(account: UserAccount, is_admin: bool) -> Element {
+fn User(
+    account: UserAccount,
+    is_admin: bool,
+    self_is_admin: bool,
+    group_id: u64,
+    user_id: u64,
+    credentials: AccountCredentials,
+) -> Element {
     const ICON_TRANSPARENT: Asset = asset!(
         "/assets/icon_transparent.png",
         ImageAssetOptions::new()
@@ -15,6 +26,8 @@ fn User(account: UserAccount, is_admin: bool) -> Element {
             .with_format(ImageFormat::Avif)
     );
 
+    let mut action_result = use_signal(|| PacketState::NotStarted);
+
     let mut title = account
         .username
         .unwrap_or(account.email.clone().unwrap_or("Anonymous".to_owned()));
@@ -22,6 +35,12 @@ fn User(account: UserAccount, is_admin: bool) -> Element {
         title += " [Administrator]";
     }
     let email = account.email.unwrap_or("Hidden email".to_owned());
+    let action_result_rsx = match action_result() {
+        PacketState::Response(()) | PacketState::NotStarted => rsx!(),
+        PacketState::Waiting => rsx!("Waiting..."),
+        PacketState::ServerError(err) => rsx!("Server error: {err:?}"),
+        PacketState::RequestTimeout => rsx!("Request timeout"),
+    };
     rsx! {
         div {
             class: "item-panel",
@@ -53,12 +72,63 @@ fn User(account: UserAccount, is_admin: bool) -> Element {
                     {email}
                 }
             }
+            if self_is_admin {
+                if action_result() == PacketState::NotStarted {
+                    button {
+                        font_size: "16px",
+                        padding: "8px 12px",
+                        margin_right: "8px",
+                        onclick: move |_| async move {
+                            PacketSender::default()
+                                .retry_loop(|| async {
+                                    server::kick_group_member(group_id, user_id, credentials).await
+                                }, &mut action_result)
+                                .await;
+                        },
+                        "Kick"
+                    }
+                    if is_admin {
+                        button {
+                            font_size: "16px",
+                            padding: "8px 12px",
+                            onclick: move |_| async move {
+                                PacketSender::default()
+                                    .retry_loop(|| async {
+                                        server::demote_group_member(group_id, user_id, credentials).await
+                                    }, &mut action_result)
+                                    .await;
+                            },
+                            "Demote"
+                        }
+                    } else {
+                        button {
+                            font_size: "16px",
+                            padding: "8px 12px",
+                            onclick: move |_| async move {
+                                PacketSender::default()
+                                    .retry_loop(|| async {
+                                        server::promote_group_member(group_id, user_id, credentials).await
+                                    }, &mut action_result)
+                                    .await;
+                            },
+                            "Promote"
+                        }
+                    }
+                } else {
+                    {action_result_rsx}
+                }
+            }
         }
     }
 }
 
 #[component]
-pub fn Member(member: PacketState<Option<UserAccount>>, group_member: GroupMember) -> Element {
+pub fn Member(
+    member: PacketState<Option<UserAccount>>,
+    group_id: u64,
+    group_member: GroupMember,
+    credentials: AccountCredentials,
+) -> Element {
     match member {
         PacketState::Response(Some(user)) => {
             rsx! {
@@ -67,6 +137,11 @@ pub fn Member(member: PacketState<Option<UserAccount>>, group_member: GroupMembe
                     key: group_member.user_id,
                     account: user,
                     is_admin: group_member.is_admin,
+                    // TODO:
+                    self_is_admin: true,
+                    group_id,
+                    user_id: group_member.user_id,
+                    credentials,
                 }
                 // button {
                 //     key: group.id,
@@ -86,8 +161,7 @@ pub fn Member(member: PacketState<Option<UserAccount>>, group_member: GroupMembe
             }
         }
         PacketState::Response(None) => rsx!("Deleted account"),
-        PacketState::NotStarted |
-            PacketState::Waiting => rsx!("Loading member..."),
+        PacketState::NotStarted | PacketState::Waiting => rsx!("Loading member..."),
         PacketState::ServerError(err) => rsx!("Server error: {err:?}"),
         PacketState::RequestTimeout => rsx!("Request timeout"),
     }
@@ -128,16 +202,17 @@ pub fn GroupMenu(group_id: u64, credentials: AccountCredentials) -> Element {
                 use_future(move || async move {
                     for (i, member) in cached_members().iter().enumerate() {
                         println!("LOADING MEMBER {i}");
-                        CACHE.user_data_vec(member.user_id, credentials, &mut cached_members_data, i).await;
+                        CACHE
+                            .user_data_vec(member.user_id, credentials, &mut cached_members_data, i)
+                            .await;
                         println!("RESULT: {:?}", cached_members_data()[i]);
                     }
                 });
                 rsx! {
                     for (i, member) in data.iter().enumerate() {
-                        Member { member: member.clone(), group_member: cached_members()[i].clone() }
+                        Member { member: member.clone(), group_id, group_member: cached_members()[i].clone(), credentials }
                     }
                 }
-
             } else {
                 rsx!("Loading members...")
             }
@@ -183,7 +258,14 @@ pub fn GroupMenu(group_id: u64, credentials: AccountCredentials) -> Element {
             br {}
             button {
                 onclick: move |_| async move {
-                    println!("Leave group pressed!");
+                    match server::leave_group(group_id, credentials).await {
+                        Ok(()) => {}
+                        Err(err) => {
+                            eprintln!("Unexpected error occurred while trying to leave a group: {err:?}");
+                        }
+                    }
+                    let nav = navigator();
+                    nav.go_back();
                 },
                 "Leave"
             }

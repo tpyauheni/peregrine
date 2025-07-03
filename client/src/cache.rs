@@ -86,7 +86,11 @@ impl CacheStorage {
         }
 
         PacketSender::default()
-            .retry_loop_vec(|| server::get_user_data(user_id, credentials), signal, index)
+            .retry_loop_vec(
+                || server::get_user_data(user_id, credentials),
+                signal,
+                index,
+            )
             .await;
 
         if let PacketState::Response(Some(ref data)) = signal()[index] {

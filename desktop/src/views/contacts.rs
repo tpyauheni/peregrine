@@ -1,8 +1,12 @@
 use std::{rc::Rc, time::Duration};
 
+use chrono::Local;
 use client::{cache::CACHE, future_retry_loop, packet_sender::PacketState};
-use dioxus::{html::{geometry::euclid::Size2D, select}, logger::tracing::error, prelude::*};
-use server::{AccountCredentials, DmGroup, DmMessage, FoundAccount, GroupMessage, MultiUserGroup};
+use dioxus::{logger::tracing::error, prelude::*};
+use server::{
+    AccountCredentials, DmGroup, DmMessage, FoundAccount, GroupMessage, MessageStatus,
+    MultiUserGroup,
+};
 
 use crate::Route;
 
@@ -695,15 +699,68 @@ pub fn DmGroupPanel(
 #[component]
 #[allow(non_snake_case)]
 fn DmMessageComponent(message: DmMessage) -> Element {
+    const ICON_MSG_STATUS_SENT: Asset = asset!(
+        "/assets/msg_status_sent_icon.png",
+        ImageAssetOptions::new()
+            .with_size(ImageSize::Manual {
+                width: 16,
+                height: 16,
+            })
+            .with_format(ImageFormat::Avif)
+    );
+    const ICON_MSG_STATUS_DELIVERED: Asset = asset!(
+        "/assets/msg_status_delivered_icon.png",
+        ImageAssetOptions::new()
+            .with_size(ImageSize::Manual {
+                width: 19,
+                height: 16,
+            })
+            .with_format(ImageFormat::Avif)
+    );
+    let sent_by_me = message.status != MessageStatus::SentByOther;
+    let time = if let Some(time) = message.sent_time {
+        let utc = time.and_local_timezone(Local).unwrap();
+        utc.time().format("%H:%M").to_string()
+    } else {
+        "??:??".to_owned()
+    };
     rsx! {
         div {
-            class: {format!("message {}", if message.sent_by_me {
+            class: {format!("message {}", if sent_by_me {
                 "msg-me"
             } else {
                 "msg-other"
             })},
 
             {String::from_utf8_lossy(&message.content)}
+            div {
+                class: "msg-info",
+
+                if sent_by_me {
+                    p {
+                        class: "time-text time-text-me",
+                        {time}
+                    }
+                    if message.status == MessageStatus::Sent {
+                        img {
+                            src: ICON_MSG_STATUS_SENT,
+                            alt: "Sent",
+                            class: "msg-status-icon msg-status-sent",
+                        }
+                    } else if message.status == MessageStatus::Delivered {
+                        img {
+                            src: ICON_MSG_STATUS_DELIVERED,
+                            alt: "Delivered",
+                            class: "msg-status-icon msg-status-delivered",
+                        }
+                    }
+                } else {
+                    p {
+                        class: "time-text time-text-other",
+                        {time}
+                    }
+                }
+            }
         }
         br {}
     }
@@ -815,16 +872,38 @@ fn GroupMessageComponent(
             }
         },
     };
+    let sent_by_me = message.sender_id == self_id;
+    let time = if let Some(time) = message.sent_time {
+        let utc = time.and_local_timezone(Local).unwrap();
+        utc.time().format("%H:%M").to_string()
+    } else {
+        "??:??".to_owned()
+    };
     rsx! {
         {author}
         div {
-            class: {format!("message {}", if message.sender_id == self_id {
+            class: {format!("message {}", if sent_by_me {
                 "msg-me"
             } else {
                 "msg-other"
             })},
 
             {String::from_utf8_lossy(&message.content)}
+            div {
+                class: "msg-info",
+
+                if sent_by_me {
+                    p {
+                        class: "time-text time-text-me",
+                        {time}
+                    }
+                } else {
+                    p {
+                        class: "time-text time-text-other",
+                        {time}
+                    }
+                }
+            }
         }
         br {}
     }

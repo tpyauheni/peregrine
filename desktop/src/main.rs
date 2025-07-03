@@ -4,8 +4,8 @@ use server::AccountCredentials;
 #[cfg(debug_assertions)]
 use views::ChangeCredentials;
 use views::{
-    Contacts, CreateGroup, Home, Invites, LoginAccount, OtherUserAccount, RegisterAccount,
-    SessionValidityChecker, GroupMenu,
+    Contacts, CreateGroup, GroupMenu, Home, Invites, LoginAccount, OtherUserAccount,
+    RegisterAccount, SessionValidityChecker,
 };
 
 mod views;

@@ -77,10 +77,10 @@ pub fn SentInvitesTab(credentials: AccountCredentials) -> Element {
             PacketState::Response(group_invites) => {
                 rsx! {
                     for invite in dm_invites {
-                        SentInvite { key: invite.id * 2, invite: Invite::Conversation(invite), credentials }
+                        SentInvite { key: {invite.id * 2}, invite: Invite::Conversation(invite), credentials }
                     }
                     for invite in group_invites {
-                        SentInvite { key: invite.id * 2 + 1, invite: Invite::Group(invite), credentials }
+                        SentInvite { key: {invite.id * 2 + 1}, invite: Invite::Group(invite), credentials }
                     }
                 }
             }
@@ -112,10 +112,10 @@ pub fn ReceivedInvitesTab(credentials: AccountCredentials) -> Element {
             PacketState::Response(group_invites) => {
                 rsx! {
                     for invite in dm_invites {
-                        ReceivedInvite { key: invite.id * 2, invite: Invite::Conversation(invite), credentials }
+                        ReceivedInvite { key: {invite.id * 2}, invite: Invite::Conversation(invite), credentials }
                     }
                     for invite in group_invites {
-                        ReceivedInvite { key: invite.id * 2 + 1, invite: Invite::Group(invite), credentials }
+                        ReceivedInvite { key: {invite.id * 2 + 1}, invite: Invite::Group(invite), credentials }
                     }
                 }
             }

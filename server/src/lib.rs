@@ -4,15 +4,20 @@ pub mod secret;
 use std::{fmt::Display, str::FromStr};
 
 use base64::{Engine, prelude::BASE64_URL_SAFE_NO_PAD};
+use chrono::NaiveDateTime;
+#[cfg(feature = "server")]
 use chrono::{DateTime, TimeDelta, Utc};
 #[cfg(feature = "server")]
 use dioxus::logger::tracing::{debug, error, info};
 use dioxus::prelude::*;
 use serde::{Deserialize, Serialize};
+#[cfg(feature = "server")]
 use shared::crypto::PublicKey;
 #[cfg(feature = "server")]
 use shared::limits::LIMITS;
-use shared::types::{GroupPermissions, UserIcon};
+#[cfg(feature = "server")]
+use shared::types::GroupPermissions;
+use shared::types::UserIcon;
 
 #[cfg(feature = "server")]
 use crate::secret::db::DB;
@@ -131,14 +136,21 @@ pub struct FoundAccount {
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub enum MessageStatus {
+    SentByOther,
+    Sent,
+    Delivered,
+}
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DmMessage {
     pub id: u64,
     pub encryption_method: String,
     pub content: Box<[u8]>,
     pub reply_to: Option<u64>,
     pub edit_for: Option<u64>,
-    pub sent_time: Option<chrono::NaiveDateTime>,
-    pub sent_by_me: bool,
+    pub sent_time: Option<NaiveDateTime>,
+    pub status: MessageStatus,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -148,7 +160,7 @@ pub struct GroupMessage {
     pub content: Box<[u8]>,
     pub reply_to: Option<u64>,
     pub edit_for: Option<u64>,
-    pub sent_time: Option<chrono::NaiveDateTime>,
+    pub sent_time: Option<NaiveDateTime>,
     pub sender_id: u64,
 }
 
@@ -565,15 +577,29 @@ pub async fn fetch_new_dm_messages(
     check_session(credentials)?;
     check_is_in_dm_group(credentials.id, group_id)?;
 
-    match DB.get_dm_messages(last_received_message_id, group_id, credentials.id) {
-        Ok(messages) => Ok(messages),
+    let result = match DB.get_dm_messages(last_received_message_id, group_id, credentials.id) {
+        Ok(messages) => messages,
         Err(err) => {
             error!("Failed to fetch new DM messages: {err:?}");
-            Err(ServerFnError::WrappedServerError(
+            return Err(ServerFnError::WrappedServerError(
                 ServerError::InternalDatabaseError,
-            ))
+            ));
+        }
+    };
+
+    for message in result.iter() {
+        if message.status == MessageStatus::SentByOther {
+            let db_result = DB.mark_dm_message_delivered(group_id, message.id);
+            if let Err(err) = db_result {
+                error!(
+                    "Failed to mark DM message {} as delivered: {err:?}",
+                    message.id
+                );
+            }
         }
     }
+
+    Ok(result)
 }
 
 #[server]
@@ -1221,11 +1247,105 @@ pub async fn get_group_members(
     }
 }
 
+#[server]
+pub async fn kick_group_member(
+    group_id: u64,
+    user_id: u64,
+    credentials: AccountCredentials,
+) -> Result<(), ServerFnError<ServerError>> {
+    check_session(credentials)?;
+    check_is_in_group(credentials.id, group_id)?;
+
+    // TODO: Check permissions.
+
+    match DB.remove_group_member(group_id, user_id) {
+        Ok(()) => Ok(()),
+        Err(err) => {
+            error!("Failed to kick user from a group: {err:?}");
+            Err(ServerFnError::WrappedServerError(
+                ServerError::InternalDatabaseError,
+            ))
+        }
+    }
+}
+
+#[server]
+pub async fn promote_group_member(
+    group_id: u64,
+    user_id: u64,
+    credentials: AccountCredentials,
+) -> Result<(), ServerFnError<ServerError>> {
+    check_session(credentials)?;
+    check_is_in_group(credentials.id, group_id)?;
+
+    // TODO: Check permissions.
+
+    match DB.set_group_member_permissions(group_id, user_id, GroupPermissions::admin()) {
+        Ok(()) => Ok(()),
+        Err(err) => {
+            error!("Failed to promote user in a group: {err:?}");
+            Err(ServerFnError::WrappedServerError(
+                ServerError::InternalDatabaseError,
+            ))
+        }
+    }
+}
+
+#[server]
+pub async fn demote_group_member(
+    group_id: u64,
+    user_id: u64,
+    credentials: AccountCredentials,
+) -> Result<(), ServerFnError<ServerError>> {
+    check_session(credentials)?;
+    check_is_in_group(credentials.id, group_id)?;
+
+    // TODO: Check permissions.
+
+    match DB.set_group_member_permissions(group_id, user_id, GroupPermissions::default()) {
+        Ok(()) => Ok(()),
+        Err(err) => {
+            error!("Failed to demote user in a group: {err:?}");
+            Err(ServerFnError::WrappedServerError(
+                ServerError::InternalDatabaseError,
+            ))
+        }
+    }
+}
+
+#[server]
+pub async fn leave_group(
+    group_id: u64,
+    credentials: AccountCredentials,
+) -> Result<(), ServerFnError<ServerError>> {
+    check_session(credentials)?;
+    check_is_in_group(credentials.id, group_id)?;
+
+    match DB.remove_group_member(group_id, credentials.id) {
+        Ok(()) => Ok(()),
+        Err(err) => {
+            error!("Failed to leave from a group: {err:?}");
+            Err(ServerFnError::WrappedServerError(
+                ServerError::InternalDatabaseError,
+            ))
+        }
+    }
+}
+
 #[cfg(feature = "server")]
 pub fn init_server() {
     println!("Initializing server");
 
-    if let Err(err) = DB.init() {
+    if std::env::var("PEREGRINE_RESET_DATABASE").unwrap_or("0".to_owned()) == "1" {
+        println!("RESETTING DATABASE IN 10 SECONDS...");
+        std::thread::sleep(std::time::Duration::from_secs(10));
+
+        if let Err(err) = DB.reset() {
+            eprintln!("An error was encountered while resetting database: {err:?}");
+        } else {
+            println!("Database resetted successfully");
+        }
+    } else if let Err(err) = DB.init() {
         eprintln!("An error was encountered while initializing database: {err:?}");
     } else {
         println!("Database initialized successfully");

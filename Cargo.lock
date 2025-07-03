@@ -338,7 +338,7 @@ checksum = "72b3254f16251a8381aa12e40e3c4d2f0199f8c6508fbecb9d91f575e0fbb8c6"
 [[package]]
 name = "bee2-rs"
 version = "0.2.1"
-source = "git+ssh://git@github.com/tpyauheni/bee2-rs.git#8448ebc83a8076e77242a817b1680d4997d7da35"
+source = "git+https://github.com/tpyauheni/bee2-rs.git#8448ebc83a8076e77242a817b1680d4997d7da35"
 dependencies = [
  "bindgen",
  "cmake",
@@ -1017,6 +1017,7 @@ name = "desktop"
 version = "0.1.0"
 dependencies = [
  "base64",
+ "chrono",
  "client",
  "dioxus",
  "dioxus-free-icons",

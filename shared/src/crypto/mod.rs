@@ -203,12 +203,14 @@ pub fn kdf(alg_name: &str, data: &[u8], result_len: usize) -> Option<Box<[u8]>> 
     }
 }
 
+type ByteData = Box<[u8]>;
+
 pub fn aead_wrap(
     alg_name: &str,
     plaintext: &[u8],
     key: PrivateKey,
     public_data: &[u8],
-) -> Option<(Box<[u8]>, Box<[u8]>)> {
+) -> Option<(ByteData, ByteData)> {
     match alg_name {
         #[cfg(feature = "bee2-rs")]
         "bycrypto" => Some(bee2rs::aead_wrap(plaintext, key, public_data)),

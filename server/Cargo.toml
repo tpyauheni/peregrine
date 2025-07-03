@@ -8,9 +8,9 @@ dioxus = { workspace = true, features = ["fullstack"] }
 serde = { workspace = true, features = ["derive"] }
 base64 = { workspace = true }
 shared = { workspace = true }
+chrono = { workspace = true }
 mysql = { version = "26.0.0", features = ["chrono"] }
 rand = "0.9.1"
-chrono = "0.4"
 
 [features]
 default = []

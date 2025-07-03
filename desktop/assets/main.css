@@ -173,7 +173,9 @@ a:focus {
 .message {
     display: inline-block;
     border-radius: 16px 16px 16px 2px;
-    padding: 12px 20px;
+    padding: 12px 12px;
+    padding-left: 12px;
+    padding-bottom: 6px;
     font-size: 14px;
     margin-bottom: 4px;
     max-width: calc(min(100vw - max(30vw, 400px) - 20px - 16px - 20px - 16px, 700px));
@@ -201,4 +203,34 @@ a:focus {
 }
 .imitate-button:hover {
     background-color: #1c1f24;
+}
+
+.msg-info {
+    margin-top: 4px;
+    display: flex;
+    flex-direction: row;
+    justify-content: flex-end;
+}
+.time-text {
+    margin: 0;
+}
+.time-text-me {
+    color: #86a;
+}
+.time-text-other {
+    color: #5a5a5a;
+}
+.msg-status-icon {
+    background-repeat: no-repeat;
+    background-position: center center;
+    background-size: 100% 100%, auto;
+    margin-left: 8px;
+}
+.msg-status-sent {
+    width: 16px;
+    height: 16px;
+}
+.msg-status-delivered {
+    width: 19px;
+    height: 16px;
 }

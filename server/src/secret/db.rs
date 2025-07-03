@@ -1,4 +1,7 @@
-use crate::{Account, DmGroup, DmInvite, DmMessage, GroupInvite, GroupMessage, MultiUserGroup, GroupMember};
+use crate::{
+    Account, DmGroup, DmInvite, DmMessage, GroupInvite, GroupMember, GroupMessage, MessageStatus,
+    MultiUserGroup,
+};
 
 use std::sync::{Arc, LazyLock, Mutex};
 
@@ -82,7 +85,7 @@ impl Database {
         )?;
         conn.query_drop(format!(
             r"
-            CREATE TABLE IF NOT EXISTS `messages` (
+            CREATE TABLE IF NOT EXISTS `dm_messages` (
                 `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
                 `sender_id` BIGINT NOT NULL,
                 `group_id` BIGINT NOT NULL,
@@ -91,7 +94,22 @@ impl Database {
                 `edited_message_id` BIGINT,
                 `content` BLOB NOT NULL,
                 `send_time` DATETIME NOT NULL,
-                `is_dm` BIT NOT NULL
+                `delivered` BIT NOT NULL
+            );
+        ",
+            LIMITS.max_encryption_method_length
+        ))?;
+        conn.query_drop(format!(
+            r"
+            CREATE TABLE IF NOT EXISTS `group_messages` (
+                `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
+                `sender_id` BIGINT NOT NULL,
+                `group_id` BIGINT NOT NULL,
+                `encryption_method` VARCHAR({}) NOT NULL,
+                `reply_message_id` BIGINT,
+                `edited_message_id` BIGINT,
+                `content` BLOB NOT NULL,
+                `send_time` DATETIME NOT NULL
             );
         ",
             LIMITS.max_encryption_method_length
@@ -256,7 +274,7 @@ impl Database {
     ) -> DbResult<u64> {
         let mut conn = self.pool.get_conn()?;
         conn.exec_drop(
-            r"INSERT INTO `messages` (
+            r"INSERT INTO `dm_messages` (
                 `group_id`,
                 `sender_id`,
                 `encryption_method`,
@@ -264,8 +282,8 @@ impl Database {
                 `edited_message_id`,
                 `content`,
                 `send_time`,
-                `is_dm`
-            ) VALUES (?, ?, ?, NULL, NULL, ?, IFNULL(?, CURRENT_TIMESTAMP()), 1)",
+                `delivered`
+            ) VALUES (?, ?, ?, NULL, NULL, ?, IFNULL(?, CURRENT_TIMESTAMP()), 0)",
             (group_id, sender_id, encryption_method, content, send_time),
         )?;
         Ok(conn.query_first("SELECT LAST_INSERT_ID();")?.unwrap())
@@ -286,11 +304,11 @@ impl Database {
                 `reply_message_id`,
                 `edited_message_id`,
                 `content`,
-                `send_time`
-                FROM `messages`
+                `send_time`,
+                `delivered`
+                FROM `dm_messages`
                 WHERE `id` > ?
                     AND `group_id` = ?
-                    AND `is_dm` = 1
                 ORDER BY `send_time` DESC
                 LIMIT 30;",
             (last_message_id, group_id),
@@ -302,16 +320,25 @@ impl Database {
                 edited_message_id,
                 content,
                 send_time,
+                delivered_bytes,
             )| {
                 let _: u64 = sender_id;
+                let _: Box<[u8]> = delivered_bytes;
+                let delivered = delivered_bytes[0] != 0;
                 DmMessage {
                     id,
-                    sent_by_me: sender_id == account_id,
                     encryption_method,
                     content,
                     reply_to: reply_message_id,
                     edit_for: edited_message_id,
                     sent_time: send_time,
+                    status: if sender_id != account_id {
+                        MessageStatus::SentByOther
+                    } else if delivered {
+                        MessageStatus::Delivered
+                    } else {
+                        MessageStatus::Sent
+                    },
                 }
             },
         )?;
@@ -529,16 +556,15 @@ impl Database {
     ) -> DbResult<u64> {
         let mut conn = self.pool.get_conn()?;
         conn.exec_drop(
-            r"INSERT INTO `messages` (
+            r"INSERT INTO `group_messages` (
                 `group_id`,
                 `sender_id`,
                 `encryption_method`,
                 `reply_message_id`,
                 `edited_message_id`,
                 `content`,
-                `send_time`,
-                `is_dm`
-            ) VALUES (?, ?, ?, NULL, NULL, ?, IFNULL(?, CURRENT_TIMESTAMP()), 0)",
+                `send_time`
+            ) VALUES (?, ?, ?, NULL, NULL, ?, IFNULL(?, CURRENT_TIMESTAMP()))",
             (group_id, sender_id, encryption_method, content, send_time),
         )?;
         Ok(conn.query_first("SELECT LAST_INSERT_ID();")?.unwrap())
@@ -559,10 +585,9 @@ impl Database {
                 `edited_message_id`,
                 `content`,
                 `send_time`
-                FROM `messages`
+                FROM `group_messages`
                 WHERE `id` > ?
                     AND `group_id` = ?
-                    AND `is_dm` = 0
                 ORDER BY `send_time` DESC
                 LIMIT 30;",
             (last_message_id, group_id),
@@ -789,6 +814,46 @@ impl Database {
         Ok(value)
     }
 
+    pub fn remove_group_member(&self, group_id: u64, user_id: u64) -> DbResult<()> {
+        let mut conn = self.pool.get_conn()?;
+        conn.exec_drop(
+            r"DELETE FROM `group_members`
+            WHERE `group_id` = ?
+                AND `user_id` = ?;",
+            (group_id, user_id),
+        )?;
+        Ok(())
+    }
+
+    pub fn set_group_member_permissions(
+        &self,
+        group_id: u64,
+        user_id: u64,
+        permissions: GroupPermissions,
+    ) -> DbResult<()> {
+        let mut conn = self.pool.get_conn()?;
+        conn.exec_drop(
+            r"UPDATE `group_members`
+            SET `permissions` = ?
+            WHERE `group_id` = ?
+                AND `user_id` = ?;",
+            (permissions.to_bytes(), group_id, user_id),
+        )?;
+        Ok(())
+    }
+
+    pub fn mark_dm_message_delivered(&self, group_id: u64, message_id: u64) -> DbResult<()> {
+        let mut conn = self.pool.get_conn()?;
+        conn.exec_drop(
+            r"UPDATE `dm_messages`
+            SET `delivered` = 1
+            WHERE `group_id` = ?
+                AND `id` = ?;",
+            (group_id, message_id),
+        )?;
+        Ok(())
+    }
+
     pub fn reset(&self) -> DbResult<()> {
         let mut conn = self.pool.get_conn()?;
         conn.query_drop("DROP TABLE IF EXISTS `accounts`;")?;
@@ -796,7 +861,8 @@ impl Database {
         conn.query_drop("DROP TABLE IF EXISTS `groups`;")?;
         conn.query_drop("DROP TABLE IF EXISTS `dm_groups`;")?;
         conn.query_drop("DROP TABLE IF EXISTS `group_members`;")?;
-        conn.query_drop("DROP TABLE IF EXISTS `messages`;")?;
+        conn.query_drop("DROP TABLE IF EXISTS `dm_messages`;")?;
+        conn.query_drop("DROP TABLE IF EXISTS `group_messages`;")?;
         conn.query_drop("DROP TABLE IF EXISTS `read_messages`;")?;
         conn.query_drop("DROP TABLE IF EXISTS `dm_invites`;")?;
         conn.query_drop("DROP TABLE IF EXISTS `group_invites`;")?;
@@ -829,7 +895,7 @@ pub mod rng {
 mod tests {
     use std::sync::{LazyLock, Mutex, Once};
 
-    use crate::{DmInvite, secret::db::Account};
+    use crate::{DmInvite, MessageStatus, secret::db::Account};
 
     use super::Database;
 
@@ -1058,26 +1124,33 @@ mod tests {
                 .unwrap();
             DB.send_dm_message(2, dm_group1, "privatecipher123", &[0x69, 0x68], None)
                 .unwrap();
+            DB.mark_dm_message_delivered(dm_group1, 1).unwrap();
             let dm_messages1 = DB.get_dm_messages(0, dm_group1, 1).unwrap();
             assert_eq!(dm_messages1[0].id, 1);
             assert_eq!(dm_messages1[0].encryption_method, "!plaintext");
             assert_eq!(dm_messages1[0].content, "Hello, World!".as_bytes().into());
             assert_eq!(dm_messages1[0].reply_to, None);
             assert_eq!(dm_messages1[0].edit_for, None);
-            assert!(dm_messages1[0].sent_by_me);
+            assert_eq!(dm_messages1[0].status, MessageStatus::Delivered);
             assert_eq!(dm_messages1[1].id, 2);
             assert_eq!(dm_messages1[1].encryption_method, "privatecipher123");
             assert_eq!(dm_messages1[1].content, [0x69, 0x68].into());
             assert_eq!(dm_messages1[1].reply_to, None);
             assert_eq!(dm_messages1[1].edit_for, None);
-            assert!(!dm_messages1[1].sent_by_me);
+            assert_eq!(dm_messages1[1].status, MessageStatus::SentByOther);
             assert_eq!(dm_messages1.len(), 2);
             let mut dm_messages2 = DB.get_dm_messages(0, dm_group1, 2).unwrap();
-            dm_messages2[0].sent_by_me = !dm_messages2[0].sent_by_me;
-            dm_messages2[1].sent_by_me = !dm_messages2[1].sent_by_me;
+            dm_messages2[0].status = match dm_messages2[0].status {
+                MessageStatus::SentByOther => MessageStatus::Delivered,
+                _ => panic!(),
+            };
+            dm_messages2[1].status = match dm_messages2[1].status {
+                MessageStatus::Sent => MessageStatus::SentByOther,
+                _ => panic!(),
+            };
             assert_eq!(dm_messages1, dm_messages2);
-            dm_messages2[0].sent_by_me = !dm_messages2[0].sent_by_me;
-            dm_messages2[1].sent_by_me = !dm_messages2[1].sent_by_me;
+            dm_messages2[0].status = MessageStatus::SentByOther;
+            dm_messages2[1].status = MessageStatus::Sent;
             let dm_messages3 = DB.get_dm_messages(1, dm_group1, 2).unwrap();
             assert_eq!(dm_messages2[1], dm_messages3[0]);
             assert_eq!(dm_messages3.len(), 1);
