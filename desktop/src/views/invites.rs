@@ -80,7 +80,7 @@ pub fn SentInvitesTab(credentials: AccountCredentials) -> Element {
                         SentInvite { key: {invite.id * 2}, invite: Invite::Conversation(invite), credentials }
                     }
                     for invite in group_invites {
-                        SentInvite { key: {invite.id * 2 + 1}, invite: Invite::Group(invite), credentials }
+                        SentInvite { key: {invite.id * 2 + 1}, invite: Invite::Group(invite.clone()), credentials }
                     }
                 }
             }
@@ -115,7 +115,7 @@ pub fn ReceivedInvitesTab(credentials: AccountCredentials) -> Element {
                         ReceivedInvite { key: {invite.id * 2}, invite: Invite::Conversation(invite), credentials }
                     }
                     for invite in group_invites {
-                        ReceivedInvite { key: {invite.id * 2 + 1}, invite: Invite::Group(invite), credentials }
+                        ReceivedInvite { key: {invite.id * 2 + 1}, invite: Invite::Group(invite.clone()), credentials }
                     }
                 }
             }

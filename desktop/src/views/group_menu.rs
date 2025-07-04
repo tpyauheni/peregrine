@@ -127,6 +127,7 @@ pub fn Member(
     member: PacketState<Option<UserAccount>>,
     group_id: u64,
     group_member: GroupMember,
+    self_is_admin: bool,
     credentials: AccountCredentials,
 ) -> Element {
     match member {
@@ -137,8 +138,7 @@ pub fn Member(
                     key: group_member.user_id,
                     account: user,
                     is_admin: group_member.is_admin,
-                    // TODO:
-                    self_is_admin: true,
+                    self_is_admin,
                     group_id,
                     user_id: group_member.user_id,
                     credentials,
@@ -208,9 +208,17 @@ pub fn GroupMenu(group_id: u64, credentials: AccountCredentials) -> Element {
                         println!("RESULT: {:?}", cached_members_data()[i]);
                     }
                 });
+
+                let mut self_is_admin: bool = false;
+                for member in cached_members() {
+                    if member.user_id == credentials.id {
+                        self_is_admin = member.is_admin;
+                    }
+                }
+
                 rsx! {
                     for (i, member) in data.iter().enumerate() {
-                        Member { member: member.clone(), group_id, group_member: cached_members()[i].clone(), credentials }
+                        Member { member: member.clone(), group_id, group_member: cached_members()[i].clone(), self_is_admin, credentials }
                     }
                 }
             } else {

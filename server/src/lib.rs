@@ -44,6 +44,7 @@ pub enum ServerError {
     AlreadyInGroup,
     GroupPartiallyJoined,
     InvalidGroupId,
+    ActionOnSelfIsForbidden,
 }
 
 impl FromStr for ServerError {
@@ -66,6 +67,7 @@ impl FromStr for ServerError {
             "AlreadyInGroup" => Ok(Self::AlreadyInGroup),
             "GroupPartiallyJoined" => Ok(Self::GroupPartiallyJoined),
             "InvalidGroupId" => Ok(Self::InvalidGroupId),
+            "ActionOnSelfIsForbidden" => Ok(Self::ActionOnSelfIsForbidden),
             _ => {
                 let Some(s_split) = s.split_once(':') else {
                     return Err(());
@@ -104,6 +106,7 @@ impl Display for ServerError {
             Self::AlreadyInGroup => "AlreadyInGroup".to_owned(),
             Self::GroupPartiallyJoined => "GroupPartiallyJoined".to_owned(),
             Self::InvalidGroupId => "InvalidGroupId".to_owned(),
+            Self::ActionOnSelfIsForbidden => "ActionOnSelfIsForbidden".to_owned(),
         })?;
         Ok(())
     }
@@ -261,7 +264,7 @@ impl SessionParams {
     }
 }
 
-#[server]
+#[server(endpoint = "create_account")]
 pub async fn create_account(
     email: String,
     username: String,
@@ -310,7 +313,7 @@ pub async fn create_account(
     }
 }
 
-#[server]
+#[server(endpoint = "login_account")]
 pub async fn login_account(
     id: u64,
     login_algorithm: String,
@@ -435,7 +438,7 @@ fn check_session(credentials: AccountCredentials) -> Result<(), ServerFnError<Se
     }
 }
 
-#[server]
+#[server(endpoint = "are_session_credentials_valid")]
 pub async fn are_session_credentials_valid(
     credentials: AccountCredentials,
 ) -> Result<bool, ServerFnError<ServerError>> {
@@ -472,7 +475,7 @@ fn check_user(user_id: u64) -> Result<(), ServerFnError<ServerError>> {
     }
 }
 
-#[server]
+#[server(endpoint = "find_user")]
 pub async fn find_user(
     query: String,
     credentials: AccountCredentials,
@@ -535,7 +538,7 @@ pub fn check_is_in_dm_group(user_id: u64, group_id: u64) -> Result<(), ServerFnE
     }
 }
 
-#[server]
+#[server(endpoint = "send_dm_message")]
 pub async fn send_dm_message(
     group_id: u64,
     encryption_method: String,
@@ -568,7 +571,7 @@ pub async fn send_dm_message(
     }
 }
 
-#[server]
+#[server(endpoint = "fetch_new_dm_messages")]
 pub async fn fetch_new_dm_messages(
     group_id: u64,
     last_received_message_id: u64,
@@ -602,7 +605,7 @@ pub async fn fetch_new_dm_messages(
     Ok(result)
 }
 
-#[server]
+#[server(endpoint = "send_dm_invite")]
 pub async fn send_dm_invite(
     other_id: u64,
     encrypted: bool,
@@ -626,7 +629,7 @@ pub async fn send_dm_invite(
     }
 }
 
-#[server]
+#[server(endpoint = "accept_dm_invite")]
 pub async fn accept_dm_invite(
     invite_id: u64,
     credentials: AccountCredentials,
@@ -669,7 +672,7 @@ pub async fn accept_dm_invite(
     }
 }
 
-#[server]
+#[server(endpoint = "reject_dm_invite")]
 pub async fn reject_dm_invite(
     invite_id: u64,
     credentials: AccountCredentials,
@@ -701,7 +704,7 @@ pub async fn reject_dm_invite(
     }
 }
 
-#[server]
+#[server(endpoint = "get_sent_dm_invites")]
 pub async fn get_sent_dm_invites(
     credentials: AccountCredentials,
 ) -> Result<Vec<DmInvite>, ServerFnError<ServerError>> {
@@ -718,7 +721,7 @@ pub async fn get_sent_dm_invites(
     }
 }
 
-#[server]
+#[server(endpoint = "get_received_dm_invites")]
 pub async fn get_received_dm_invites(
     credentials: AccountCredentials,
 ) -> Result<Vec<DmInvite>, ServerFnError<ServerError>> {
@@ -735,7 +738,7 @@ pub async fn get_received_dm_invites(
     }
 }
 
-#[server]
+#[server(endpoint = "cancel_dm_invite")]
 pub async fn cancel_dm_invite(
     invite_id: u64,
     credentials: AccountCredentials,
@@ -767,7 +770,7 @@ pub async fn cancel_dm_invite(
     }
 }
 
-#[server]
+#[server(endpoint = "leave_dm_group")]
 pub async fn leave_dm_group(
     group_id: u64,
     credentials: AccountCredentials,
@@ -796,7 +799,7 @@ fn load_icon(prefix: &str, id: u64) -> UserIcon {
     STORAGE.raw_load(format!("{prefix}{id}.bin")).ok()
 }
 
-#[server]
+#[server(endpoint = "get_user_data")]
 pub async fn get_user_data(
     user_id: u64,
     credentials: AccountCredentials,
@@ -822,7 +825,7 @@ pub async fn get_user_data(
     }
 }
 
-#[server]
+#[server(endpoint = "get_group_data")]
 pub async fn get_group_data(
     group_id: u64,
     credentials: AccountCredentials,
@@ -854,7 +857,7 @@ pub async fn get_group_data(
     }
 }
 
-#[server]
+#[server(endpoint = "get_joined_dm_groups")]
 pub async fn get_joined_dm_groups(
     credentials: AccountCredentials,
 ) -> Result<Vec<DmGroup>, ServerFnError<ServerError>> {
@@ -874,7 +877,7 @@ pub async fn get_joined_dm_groups(
     }
 }
 
-#[server]
+#[server(endpoint = "get_joined_groups")]
 pub async fn get_joined_groups(
     credentials: AccountCredentials,
 ) -> Result<Vec<MultiUserGroup>, ServerFnError<ServerError>> {
@@ -937,7 +940,36 @@ pub fn check_is_not_in_group(
     }
 }
 
-#[server]
+#[cfg(feature = "server")]
+pub fn check_is_group_admin(
+    group_id: u64,
+    user_id: u64,
+) -> Result<(), ServerFnError<ServerError>> {
+    match DB.get_group_member_permissions(group_id, user_id) {
+        Ok(Some(permissions)) => {
+            if permissions.is_admin() {
+                Ok(())
+            } else {
+                Err(ServerFnError::WrappedServerError(
+                    ServerError::Forbidden,
+                ))
+            }
+        }
+        Ok(None) => {
+            Err(ServerFnError::WrappedServerError(
+                ServerError::Forbidden,
+            ))
+        }
+        Err(err) => {
+            error!("Failed to check whether the user is the group admin or not: {err:?}");
+            Err(ServerFnError::WrappedServerError(
+                ServerError::InternalDatabaseError,
+            ))
+        }
+    }
+}
+
+#[server(endpoint = "send_group_invite")]
 pub async fn send_group_invite(
     user_id: u64,
     group_id: u64,
@@ -959,7 +991,7 @@ pub async fn send_group_invite(
     }
 }
 
-#[server]
+#[server(endpoint = "create_group")]
 pub async fn create_group(
     name: String,
     icon: Option<Box<[u8]>>,
@@ -1007,7 +1039,7 @@ pub async fn create_group(
     }
 }
 
-#[server]
+#[server(endpoint = "fetch_new_group_messages")]
 pub async fn fetch_new_group_messages(
     group_id: u64,
     last_received_message_id: u64,
@@ -1027,7 +1059,7 @@ pub async fn fetch_new_group_messages(
     }
 }
 
-#[server]
+#[server(endpoint = "send_group_message")]
 pub async fn send_group_message(
     group_id: u64,
     encryption_method: String,
@@ -1060,7 +1092,7 @@ pub async fn send_group_message(
     }
 }
 
-#[server]
+#[server(endpoint = "get_sent_group_invites")]
 pub async fn get_sent_group_invites(
     credentials: AccountCredentials,
 ) -> Result<Vec<GroupInvite>, ServerFnError<ServerError>> {
@@ -1077,7 +1109,7 @@ pub async fn get_sent_group_invites(
     }
 }
 
-#[server]
+#[server(endpoint = "get_received_group_invites")]
 pub async fn get_received_group_invites(
     credentials: AccountCredentials,
 ) -> Result<Vec<GroupInvite>, ServerFnError<ServerError>> {
@@ -1094,7 +1126,7 @@ pub async fn get_received_group_invites(
     }
 }
 
-#[server]
+#[server(endpoint = "cancel_group_invite")]
 pub async fn cancel_group_invite(
     invite_id: u64,
     credentials: AccountCredentials,
@@ -1126,7 +1158,7 @@ pub async fn cancel_group_invite(
     }
 }
 
-#[server]
+#[server(endpoint = "accept_group_invite")]
 pub async fn accept_group_invite(
     invite_id: u64,
     credentials: AccountCredentials,
@@ -1172,7 +1204,7 @@ pub async fn accept_group_invite(
     }
 }
 
-#[server]
+#[server(endpoint = "reject_group_invite")]
 pub async fn reject_group_invite(
     invite_id: u64,
     credentials: AccountCredentials,
@@ -1204,7 +1236,7 @@ pub async fn reject_group_invite(
     }
 }
 
-#[server]
+#[server(endpoint = "get_group_member_count")]
 pub async fn get_group_member_count(
     group_id: u64,
     credentials: AccountCredentials,
@@ -1228,7 +1260,7 @@ pub async fn get_group_member_count(
     }
 }
 
-#[server]
+#[server(endpoint = "get_group_members")]
 pub async fn get_group_members(
     group_id: u64,
     credentials: AccountCredentials,
@@ -1247,16 +1279,18 @@ pub async fn get_group_members(
     }
 }
 
-#[server]
+#[server(endpoint = "kick_group_member")]
 pub async fn kick_group_member(
     group_id: u64,
     user_id: u64,
     credentials: AccountCredentials,
 ) -> Result<(), ServerFnError<ServerError>> {
     check_session(credentials)?;
-    check_is_in_group(credentials.id, group_id)?;
+    check_is_group_admin(group_id, credentials.id)?;
 
-    // TODO: Check permissions.
+    if credentials.id == user_id {
+        return Err(ServerFnError::WrappedServerError(ServerError::ActionOnSelfIsForbidden));
+    }
 
     match DB.remove_group_member(group_id, user_id) {
         Ok(()) => Ok(()),
@@ -1269,16 +1303,18 @@ pub async fn kick_group_member(
     }
 }
 
-#[server]
+#[server(endpoint = "promote_group_member")]
 pub async fn promote_group_member(
     group_id: u64,
     user_id: u64,
     credentials: AccountCredentials,
 ) -> Result<(), ServerFnError<ServerError>> {
     check_session(credentials)?;
-    check_is_in_group(credentials.id, group_id)?;
+    check_is_group_admin(group_id, credentials.id)?;
 
-    // TODO: Check permissions.
+    if credentials.id == user_id {
+        return Err(ServerFnError::WrappedServerError(ServerError::ActionOnSelfIsForbidden));
+    }
 
     match DB.set_group_member_permissions(group_id, user_id, GroupPermissions::admin()) {
         Ok(()) => Ok(()),
@@ -1291,16 +1327,18 @@ pub async fn promote_group_member(
     }
 }
 
-#[server]
+#[server(endpoint = "demote_group_member")]
 pub async fn demote_group_member(
     group_id: u64,
     user_id: u64,
     credentials: AccountCredentials,
 ) -> Result<(), ServerFnError<ServerError>> {
     check_session(credentials)?;
-    check_is_in_group(credentials.id, group_id)?;
+    check_is_group_admin(group_id, credentials.id)?;
 
-    // TODO: Check permissions.
+    if credentials.id == user_id {
+        return Err(ServerFnError::WrappedServerError(ServerError::ActionOnSelfIsForbidden));
+    }
 
     match DB.set_group_member_permissions(group_id, user_id, GroupPermissions::default()) {
         Ok(()) => Ok(()),
@@ -1313,7 +1351,7 @@ pub async fn demote_group_member(
     }
 }
 
-#[server]
+#[server(endpoint = "leave_group")]
 pub async fn leave_group(
     group_id: u64,
     credentials: AccountCredentials,

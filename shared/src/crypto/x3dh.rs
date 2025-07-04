@@ -1,6 +1,10 @@
+use std::{error::Error, fmt::Display};
+
+use serde::{Deserialize, Serialize};
+
 use super::*;
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct X3DhReceiverKeysPublic {
     pub alg_name: String,
     pub ik: PublicKey,
@@ -9,7 +13,7 @@ pub struct X3DhReceiverKeysPublic {
     pub opks: Vec<PublicKey>,
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct X3DhReceiverKeysPrivate {
     pub ik: PrivateKey,
     pub spk: PrivateKey,
@@ -56,19 +60,33 @@ pub struct X3DhData {
     signature: Box<[u8]>,
 }
 
-#[derive(Clone)]
-pub enum X3DhEncodeResult {
+#[derive(Debug, Clone)]
+pub enum X3DhError {
     AlgorithmNotSupported,
     InvalidSignature,
-    Data(X3DhData),
+    DecryptionFailure,
+    InvalidOpkKeyId,
 }
+
+impl Display for X3DhError {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        f.write_str(match *self {
+            Self::AlgorithmNotSupported => "Algorithm not supported",
+            Self::InvalidSignature => "Invalid signature",
+            Self::DecryptionFailure => "Decryption failure",
+            Self::InvalidOpkKeyId => "Invalid OPK key id",
+        })
+    }
+}
+
+impl Error for X3DhError {}
 
 pub fn encode_x3dh(
     data: &[u8],
     ik_priv: PrivateKey,
     ik_pub: PublicKey,
     other_keys: X3DhReceiverKeysPublic,
-) -> X3DhEncodeResult {
+) -> Result<X3DhData, X3DhError> {
     let alg_name = &other_keys.alg_name;
 
     match verify(
@@ -78,12 +96,12 @@ pub fn encode_x3dh(
         &other_keys.spk_signature,
     ) {
         Some(true) => {}
-        Some(false) => return X3DhEncodeResult::InvalidSignature,
-        None => return X3DhEncodeResult::AlgorithmNotSupported,
+        Some(false) => return Err(X3DhError::InvalidSignature),
+        None => return Err(X3DhError::AlgorithmNotSupported),
     }
 
     let Some((ek_priv, ek_pub)) = generate_keypair(alg_name) else {
-        return X3DhEncodeResult::AlgorithmNotSupported;
+        return Err(X3DhError::AlgorithmNotSupported);
     };
 
     let dh1 = diffie_hellman(
@@ -143,7 +161,7 @@ pub fn encode_x3dh(
     // assume it's `ik_priv`.
     let signature = sign(alg_name, ik_priv, ik_pub, &signed_data).unwrap();
 
-    X3DhEncodeResult::Data(X3DhData {
+    Ok(X3DhData {
         ek_pub,
         opk_id,
         ciphertext,
@@ -152,21 +170,12 @@ pub fn encode_x3dh(
     })
 }
 
-#[derive(Clone)]
-pub enum X3DhDecodeResult {
-    DecryptionFailure,
-    InvalidSignature,
-    InvalidOpkKeyId,
-    UnsupportedAlgorithm,
-    Data(Box<[u8]>),
-}
-
 pub fn decode_x3dh(
     data: X3DhData,
     other_ik_pub: PublicKey,
     self_keys_public: X3DhReceiverKeysPublic,
     self_keys_private: X3DhReceiverKeysPrivate,
-) -> X3DhDecodeResult {
+) -> Result<Box<[u8]>, X3DhError> {
     let alg_name = &self_keys_public.alg_name;
 
     let mut signed_data = vec![];
@@ -174,7 +183,7 @@ pub fn decode_x3dh(
     let mut opk = None;
     if let Some(opk_id) = data.opk_id {
         let Some(opk_bytes) = self_keys_public.opks.get(opk_id as usize) else {
-            return X3DhDecodeResult::InvalidOpkKeyId;
+            return Err(X3DhError::InvalidOpkKeyId);
         };
         opk = Some(opk_bytes);
         signed_data.extend(opk_bytes.pk.clone());
@@ -188,8 +197,8 @@ pub fn decode_x3dh(
         &data.signature,
     ) {
         Some(true) => {}
-        Some(false) => return X3DhDecodeResult::InvalidSignature,
-        None => return X3DhDecodeResult::UnsupportedAlgorithm,
+        Some(false) => return Err(X3DhError::InvalidSignature),
+        None => return Err(X3DhError::AlgorithmNotSupported),
     }
 
     let dh1 = diffie_hellman(
@@ -231,39 +240,33 @@ pub fn decode_x3dh(
     ad.extend(self_keys_public.ik.pk);
 
     match aead_unwrap(alg_name, &data.ciphertext, &ad, &data.mac, sk2) {
-        Some(Some(plaintext)) => X3DhDecodeResult::Data(plaintext),
-        Some(None) => X3DhDecodeResult::DecryptionFailure,
-        None => X3DhDecodeResult::UnsupportedAlgorithm,
+        Some(Some(plaintext)) => Ok(plaintext),
+        Some(None) => Err(X3DhError::DecryptionFailure),
+        None => Err(X3DhError::AlgorithmNotSupported),
     }
 }
 
 #[cfg(test)]
 mod tests {
-    use crate::crypto::x3dh::{X3DhDecodeResult, decode_x3dh, encode_x3dh, generate_receiver_keys};
+    use crate::crypto::x3dh::{decode_x3dh, encode_x3dh, generate_receiver_keys};
 
     #[test]
     fn test_x3dh() {
         let random_keys_a = generate_receiver_keys("bycrypto").unwrap();
         let random_keys_b = generate_receiver_keys("bycrypto").unwrap();
         let message = "Hello, World!".as_bytes();
-        let encode_data = match encode_x3dh(
+        let encode_data = encode_x3dh(
             message,
             random_keys_a.0.ik,
             random_keys_a.1.ik.clone(),
             random_keys_b.1.clone(),
-        ) {
-            super::X3DhEncodeResult::Data(data) => data,
-            _ => panic!(),
-        };
-        let decoded_data = match decode_x3dh(
+        ).unwrap();
+        let decoded_data = decode_x3dh(
             encode_data,
             random_keys_a.1.ik,
             random_keys_b.1,
             random_keys_b.0,
-        ) {
-            X3DhDecodeResult::Data(data) => data,
-            _ => panic!(),
-        };
+        ).unwrap();
         assert_eq!(*message, *decoded_data);
     }
 }

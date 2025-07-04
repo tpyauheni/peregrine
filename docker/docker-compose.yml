@@ -1,0 +1,42 @@
+services:
+  api-server:
+    build: .
+    env_file: .env
+    ports: ["8000:8080"]
+    environment:
+      DB_URL: "mysql://${MYSQL_USER}:${MYSQL_PASSWORD}@db/${MYSQL_DATABASE}"
+    depends_on:
+      db:
+        condition: service_healthy
+    networks:
+      - peregrine-net
+
+  db:
+    image: mysql:8.0
+    command: --default-authentication-plugin=mysql_native_password
+    env_file: .env
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      MYSQL_USER: ${MYSQL_USER}
+      MYSQL_PASSWORD: ${MYSQL_PASSWORD}
+      MYSQL_DATABASE: ${MYSQL_DATABASE}
+      HEALTHCHECK_USER: ${HEALTHCHECK_USER}
+      HEALTHCHECK_PASSWORD: ${HEALTHCHECK_PASSWORD}
+    volumes:
+      - mysql-data:/var/lib/mysql
+      - ./mysql-init:/docker-entrypoint-initdb.d
+      - ./healthcheck.sh:/healthcheck.sh
+    healthcheck:
+      test: ["CMD", "/healthcheck.sh"]
+      interval: 5s
+      timeout: 10s
+      retries: 10
+    networks:
+      - peregrine-net
+
+networks:
+  peregrine-net:
+    driver: bridge
+
+volumes:
+  mysql-data:

@@ -5,6 +5,7 @@ pub mod x3dh;
 use std::fmt::Debug;
 
 use rand::RngCore;
+use serde::{Deserialize, Serialize};
 
 pub trait SymmetricCipher<Rng: RandomNumberGenerator>: Debug + Clone {
     fn encrypt(&mut self, data: &[u8], rng: &mut Rng) -> Box<[u8]>;
@@ -117,12 +118,12 @@ pub fn default_rng() -> bee2rs::DefaultRng {
     bee2rs::rng()
 }
 
-#[derive(Debug, Clone, PartialEq, Eq)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PublicKey {
     pub pk: Box<[u8]>,
 }
 
-#[derive(Clone, PartialEq, Eq)]
+#[derive(Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct PrivateKey {
     pub sk: Box<[u8]>,
 }

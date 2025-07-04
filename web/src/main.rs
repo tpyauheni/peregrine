@@ -1,4 +1,6 @@
 use dioxus::prelude::*;
+use dioxus::logger::tracing::Level;
+
 
 use ui::Navbar;
 use views::{Blog, Home};
@@ -19,6 +21,22 @@ const FAVICON: Asset = asset!("/assets/favicon.ico");
 const MAIN_CSS: Asset = asset!("/assets/main.css");
 
 fn main() {
+    #[cfg(debug_assertions)]
+    {
+        dioxus::logger::init(Level::DEBUG).unwrap();
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        dioxus::logger::init(Level::INFO).unwrap();
+    }
+    #[cfg(feature = "server")]
+    {
+        server::init_server();
+    }
+    #[cfg(not(feature = "server"))]
+    {
+        server_fn::client::set_server_url("http://5.100.193.94:8000");
+    }
     dioxus::launch(App);
 }
 

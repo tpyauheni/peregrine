@@ -1,3 +1,5 @@
+#![windows_subsystem = "windows"]
+
 use dioxus::{logger::tracing::Level, prelude::*};
 
 use server::AccountCredentials;
@@ -51,6 +53,15 @@ fn main() {
     {
         dioxus::logger::init(Level::INFO).unwrap();
     }
+    #[cfg(all(not(feature = "desktop"), feature = "server"))]
+    {
+        server::init_server();
+    }
+
+    #[cfg(all(not(feature = "server"), not(debug_assertions)))]
+    {
+        server_fn::client::set_server_url("http://5.100.193.94:8000");
+    }
     #[cfg(all(feature = "desktop", not(debug_assertions)))]
     {
         use dioxus::desktop::Config;
@@ -66,12 +77,7 @@ fn main() {
             )
             .launch(App);
     }
-    #[cfg(all(not(feature = "desktop"), feature = "server"))]
-    {
-        server::init_server();
-    }
-
-    #[cfg(any(not(feature = "desktop"), debug_assertions))]
+    #[cfg(not(all(feature = "desktop", not(debug_assertions))))]
     dioxus::launch(App);
 }
 

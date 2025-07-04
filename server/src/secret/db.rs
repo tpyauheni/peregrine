@@ -854,6 +854,25 @@ impl Database {
         Ok(())
     }
 
+    pub fn get_group_member_permissions(
+        &self,
+        group_id: u64,
+        user_id: u64,
+    ) -> DbResult<Option<GroupPermissions>> {
+        let mut conn = self.pool.get_conn()?;
+        let Some(permission_bytes) = conn.exec_first(
+            r"SELECT `permissions`
+            FROM `group_members`
+            WHERE `group_id` = ?
+                AND `user_id` = ?;",
+            (group_id, user_id),
+        )? else {
+            return Ok(None);
+        };
+        let _: Box<[u8]> = permission_bytes;
+        Ok(Some(GroupPermissions::from_bytes(&permission_bytes)))
+    }
+
     pub fn reset(&self) -> DbResult<()> {
         let mut conn = self.pool.get_conn()?;
         conn.query_drop("DROP TABLE IF EXISTS `accounts`;")?;
