@@ -232,3 +232,46 @@ pub fn aead_unwrap(
         _ => None,
     }
 }
+
+pub fn symmetric_encrypt(
+    alg_name: &str,
+    plaintext: &[u8],
+    key: &[u8],
+) -> Option<Box<[u8]>> {
+    match alg_name {
+        #[cfg(feature = "bee2-rs")]
+        "bycrypto" => Some(bee2rs::symmetric_encrypt(plaintext, key)),
+        _ => None,
+    }
+}
+
+pub fn symmetric_decrypt(
+    alg_name: &str,
+    ciphertext: Box<[u8]>,
+    key: &[u8],
+) -> Option<Option<Box<[u8]>>> {
+    match alg_name {
+        #[cfg(feature = "bee2-rs")]
+        "bycrypto" => Some(bee2rs::symmetric_decrypt(ciphertext, key)),
+        _ => None,
+    }
+}
+
+pub fn supported_algorithms() -> Vec<&'static str> {
+    vec![
+        #[cfg(feature = "bee2-rs")]
+        "bycrypto",
+    ]
+}
+
+pub fn to_encryption_method(alg_name: &str) -> String {
+    #[cfg(feature = "bee2-rs")]
+    if alg_name == "bycrypto" {
+        return "belt-ctr".to_owned();
+    }
+    "none".to_owned()
+}
+
+pub fn preferred_alogirthm() -> &'static str {
+    supported_algorithms()[0]
+}

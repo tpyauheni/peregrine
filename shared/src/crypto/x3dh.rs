@@ -4,7 +4,7 @@ use serde::{Deserialize, Serialize};
 
 use super::*;
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct X3DhReceiverKeysPublic {
     pub alg_name: String,
     pub ik: PublicKey,
@@ -13,7 +13,7 @@ pub struct X3DhReceiverKeysPublic {
     pub opks: Vec<PublicKey>,
 }
 
-#[derive(Clone, Serialize, Deserialize)]
+#[derive(Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct X3DhReceiverKeysPrivate {
     pub ik: PrivateKey,
     pub spk: PrivateKey,

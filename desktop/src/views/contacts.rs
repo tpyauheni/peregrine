@@ -1,7 +1,8 @@
 use std::{rc::Rc, time::Duration};
 
 use chrono::Local;
-use client::{cache::CACHE, future_retry_loop, packet_sender::PacketState};
+use client::{cache::CACHE, future_retry_loop, packet_sender::PacketState, storage::STORAGE};
+use shared::crypto;
 use dioxus::{logger::tracing::error, prelude::*};
 use server::{
     AccountCredentials, DmGroup, DmMessage, FoundAccount, GroupMessage, MessageStatus,
@@ -408,13 +409,19 @@ fn DmMessagesPanel(selected_dm_group: DmGroup, credentials: AccountCredentials) 
                             return;
                         }
                         event.prevent_default();
-                        // TODO: Encryption.
                         let content = message();
-                        let msg_bytes: Box<[u8]> = Box::from(content.clone().as_bytes());
+                        let (msg_bytes, encryption_method): (Box<[u8]>, String) = if let Some((algorithm_name, key)) = STORAGE.load_dm_key(selected_dm_group.id) {
+                            (
+                                crypto::symmetric_encrypt(&algorithm_name, content.as_bytes(), &key).unwrap(),
+                                crypto::to_encryption_method(&algorithm_name),
+                            )
+                        } else {
+                            (Box::from(content.clone().as_bytes()), "plain".to_owned())
+                        };
                         println!("Send result: {:?}", server::send_dm_message(
                             selected_dm_group.id,
-                            "plain".to_owned(),
-                            msg_bytes.clone(),
+                            encryption_method,
+                            msg_bytes,
                             credentials,
                         ).await);
                         // PacketSender::default()
@@ -424,7 +431,7 @@ fn DmMessagesPanel(selected_dm_group: DmGroup, credentials: AccountCredentials) 
                         //         msg_bytes.clone(),
                         //         credentials,
                         //     ), &mut sending_message).await;
-                        println!("Sending message: {content:?}");
+                        // println!("Sending message: {content:?}");
                         message.set(String::new());
                         dm_messages_resource.restart();
                         document::eval(r#"let input = document.getElementById("main-msg-input");

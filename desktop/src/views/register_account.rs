@@ -1,7 +1,7 @@
 use client::storage::STORAGE;
 use dioxus::{logger::tracing::info, prelude::*};
 use server::AccountCredentials;
-use shared::crypto::AsymmetricCipherPublic;
+use shared::crypto::{self, AsymmetricCipherPublic};
 
 use crate::Route;
 
@@ -171,8 +171,9 @@ pub fn RegisterAccount() -> Element {
             "Submitting form: email='{email}', username='{username}', server='{server}', public_key={public_key:?}"
         );
         error_sig.set(None);
+        let (_, x3dh_public) = STORAGE.x3dh_data(crypto::preferred_alogirthm());
         let (account_id, session_token) =
-            server::create_account(email.to_owned(), username.to_owned(), public_key)
+            server::create_account(email.to_owned(), username.to_owned(), public_key, x3dh_public)
                 .await
                 .unwrap();
         let login_credentials = AccountCredentials {

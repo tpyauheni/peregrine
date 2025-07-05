@@ -2,13 +2,15 @@ use crate::{
     Account, DmGroup, DmInvite, DmMessage, GroupInvite, GroupMember, GroupMessage, MessageStatus,
     MultiUserGroup,
 };
+use shared::{types::GroupPermissions, crypto::x3dh::{X3DhReceiverKeysPublic}};
+use shared::limits::LIMITS;
 
 use std::sync::{Arc, LazyLock, Mutex};
 
 use mysql::prelude::*;
 use mysql::{Pool, Row, params};
 use rand::{SeedableRng, rngs::StdRng};
-use shared::{limits::LIMITS, types::GroupPermissions};
+use postcard::{from_bytes, to_allocvec};
 
 #[derive(Debug, Clone)]
 pub struct Database {
@@ -35,6 +37,7 @@ impl Database {
             CREATE TABLE IF NOT EXISTS `accounts` (
                 `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
                 `public_key` BLOB NOT NULL,
+                `public_x3dh_data` BLOB NOT NULL,
                 `encrypted_private_info` BLOB NOT NULL,
                 `email` VARCHAR(255),
                 `username` VARCHAR(255)
@@ -129,7 +132,7 @@ impl Database {
                 `id` BIGINT NOT NULL AUTO_INCREMENT PRIMARY KEY,
                 `initiator_id` BIGINT NOT NULL,
                 `other_id` BIGINT NOT NULL,
-                `encrypted` BIT NOT NULL
+                `encryption_data` BLOB
             );
         ",
         )?;
@@ -140,7 +143,8 @@ impl Database {
                 `inviter_id` BIGINT NOT NULL,
                 `invited_id` BIGINT NOT NULL,
                 `group_id` BIGINT NOT NULL,
-                `permissions` VARCHAR(255) NOT NULL
+                `permissions` VARCHAR(255) NOT NULL,
+                `encryption_data` BLOB
             );
         ",
         )?;
@@ -150,6 +154,7 @@ impl Database {
     pub fn create_account(
         &self,
         public_key: &[u8],
+        public_x3dh_data: X3DhReceiverKeysPublic,
         encrypted_private_info: &[u8],
         email: Option<&str>,
         username: Option<&str>,
@@ -158,11 +163,12 @@ impl Database {
         conn.exec_drop(
             r"INSERT INTO `accounts` (
                 `public_key`,
+                `public_x3dh_data`,
                 `encrypted_private_info`,
                 `email`,
                 `username`
-            ) VALUES (?, ?, ?, ?);",
-            (public_key, encrypted_private_info, email, username),
+            ) VALUES (?, ?, ?, ?, ?);",
+            (public_key, to_allocvec(&public_x3dh_data)?, encrypted_private_info, email, username),
         )?;
         // `LAST_INSERT_ID()` returns the last id only for the current Pool connection.
         Ok(conn.query_first("SELECT LAST_INSERT_ID();")?.unwrap())
@@ -197,7 +203,8 @@ impl Database {
     pub fn find_user(&self, query: &str, ignore_user: u64) -> DbResult<Vec<Account>> {
         let mut conn = self.pool.get_conn()?;
         let query = format!("%{query}%");
-        let accounts = conn.exec_map(
+        let mut accounts = vec![];
+        conn.exec_map(
             r"SELECT * FROM `accounts`
                 WHERE (`username` LIKE :query
                     OR `email` LIKE :query)
@@ -207,12 +214,17 @@ impl Database {
                 query,
                 ignore_user,
             },
-            |(id, public_key, encrypted_private_info, email, username)| Account {
-                id,
-                public_key,
-                encrypted_private_info,
-                email,
-                username,
+            |(id, cryptoidentity, public_key, encrypted_private_info, email, username)| {
+                if let Ok(cryptoidentity) = from_bytes(&cryptoidentity as &Box<[u8]>) {
+                    accounts.push(Account {
+                        id,
+                        cryptoidentity,
+                        public_key,
+                        encrypted_private_info,
+                        email,
+                        username,
+                    })
+                }
             },
         )?;
         Ok(accounts)
@@ -349,16 +361,16 @@ impl Database {
         &self,
         initiator_id: u64,
         other_id: u64,
-        encrypted: bool,
+        encryption_data: Option<&[u8]>,
     ) -> DbResult<u64> {
         let mut conn = self.pool.get_conn()?;
         conn.exec_drop(
             r"INSERT INTO `dm_invites` (
             `initiator_id`,
             `other_id`,
-            `encrypted`
+            `encryption_data`
         ) VALUES (?, ?, ?);",
-            (initiator_id, other_id, encrypted),
+            (initiator_id, other_id, encryption_data),
         )?;
         Ok(conn.query_first("SELECT LAST_INSERT_ID();")?.unwrap())
     }
@@ -372,12 +384,15 @@ impl Database {
                 (id,),
             )?
             .unwrap();
-        let encrypted_bytes: Box<[u8]> = invite.take_opt(3).unwrap()?;
         Ok(DmInvite {
             id: invite.take_opt(0).unwrap()?,
             initiator_id: invite.take_opt(1).unwrap()?,
             other_id: invite.take_opt(2).unwrap()?,
-            encrypted: encrypted_bytes[0] != 0,
+            encryption_data: if let Some(data) = invite.take_opt(3) {
+                Some(data?)
+            } else {
+                None
+            },
         })
     }
 
@@ -401,13 +416,12 @@ impl Database {
                 ORDER BY `id` DESC
                 LIMIT 30;",
             (id,),
-            |(id, initiator_id, other_id, encrypted_bytes)| {
-                let _: Box<[u8]> = encrypted_bytes;
+            |(id, initiator_id, other_id, encryption_data)| {
                 DmInvite {
                     id,
                     initiator_id,
                     other_id,
-                    encrypted: encrypted_bytes[0] != 0,
+                    encryption_data,
                 }
             },
         )?;
@@ -424,13 +438,12 @@ impl Database {
                 ORDER BY `id` DESC
                 LIMIT 30;",
             (id,),
-            |(id, initiator_id, other_id, encrypted_bytes)| {
-                let _: Box<[u8]> = encrypted_bytes;
+            |(id, initiator_id, other_id, encryption_data)| {
                 DmInvite {
                     id,
                     initiator_id,
                     other_id,
-                    encrypted: encrypted_bytes[0] != 0,
+                    encryption_data,
                 }
             },
         )?;
@@ -478,12 +491,15 @@ impl Database {
             return Ok(None);
         };
         let _: Row = user;
+        let cryptoidentity: Box<[u8]> = user.take_opt(1).unwrap()?;
+        let cryptoidentity = from_bytes(&cryptoidentity)?;
         Ok(Some(Account {
             id: user.take_opt(0).unwrap()?,
-            public_key: user.take_opt(1).unwrap()?,
-            encrypted_private_info: user.take_opt(2).unwrap()?,
-            email: user.take_opt(3).unwrap()?,
-            username: user.take_opt(4).unwrap()?,
+            cryptoidentity,
+            public_key: user.take_opt(2).unwrap()?,
+            encrypted_private_info: user.take_opt(3).unwrap()?,
+            email: user.take_opt(4).unwrap()?,
+            username: user.take_opt(5).unwrap()?,
         }))
     }
 
@@ -621,6 +637,7 @@ impl Database {
         invited_id: u64,
         group_id: u64,
         permissions: &[u8],
+        encryption_data: Option<&[u8]>,
     ) -> DbResult<u64> {
         let mut conn = self.pool.get_conn()?;
         conn.exec_drop(
@@ -628,9 +645,10 @@ impl Database {
             `inviter_id`,
             `invited_id`,
             `group_id`,
-            `permissions`
+            `permissions`,
+            `encryption_data`
         ) VALUES (?, ?, ?, ?);",
-            (inviter_id, invited_id, group_id, permissions),
+            (inviter_id, invited_id, group_id, permissions, encryption_data),
         )?;
         Ok(conn.query_first("SELECT LAST_INSERT_ID();")?.unwrap())
     }
@@ -650,6 +668,11 @@ impl Database {
             invited_id: invite.take_opt(2).unwrap()?,
             group_id: invite.take_opt(3).unwrap()?,
             permissions: invite.take_opt(4).unwrap()?,
+            encryption_data: if let Some(data) = invite.take_opt(5) {
+                Some(data?)
+            } else {
+                None
+            },
         })
     }
 
@@ -673,12 +696,13 @@ impl Database {
                 ORDER BY `id` DESC
                 LIMIT 30;",
             (id,),
-            |(id, inviter_id, invited_id, group_id, permissions)| GroupInvite {
+            |(id, inviter_id, invited_id, group_id, permissions, encryption_data)| GroupInvite {
                 id,
                 inviter_id,
                 invited_id,
                 group_id,
                 permissions,
+                encryption_data,
             },
         )?;
         Ok(value)
@@ -694,12 +718,13 @@ impl Database {
                 ORDER BY `id` DESC
                 LIMIT 30;",
             (id,),
-            |(id, inviter_id, invited_id, group_id, permissions)| GroupInvite {
+            |(id, inviter_id, invited_id, group_id, permissions, encryption_data)| GroupInvite {
                 id,
                 inviter_id,
                 invited_id,
                 group_id,
                 permissions,
+                encryption_data,
             },
         )?;
         Ok(value)
@@ -912,16 +937,18 @@ pub mod rng {
 
 #[cfg(test)]
 mod tests {
-    use std::sync::{LazyLock, Mutex, Once};
+    use std::{sync::{LazyLock, Mutex, Once}, collections::HashMap};
 
     use crate::{DmInvite, MessageStatus, secret::db::Account};
 
     use super::Database;
+    use shared::crypto::x3dh::{X3DhReceiverKeysPublic, self};
 
     static DB: LazyLock<Database> =
         LazyLock::new(|| Database::new(&std::env::var("TEST_DB_URL").unwrap()));
     static INIT: Once = Once::new();
     static DB_TEST_NUMBER: LazyLock<Mutex<usize>> = LazyLock::new(|| Mutex::new(0));
+    static CRYPTOIDENTITIES: LazyLock<Mutex<HashMap<u64, X3DhReceiverKeysPublic>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
 
     fn db_test(test_number: usize, test_fn: fn()) {
         INIT.call_once(|| {
@@ -939,6 +966,16 @@ mod tests {
         *test_lock = test_number + 1;
     }
 
+    fn cryptoidentity_for(user_id: u64) -> X3DhReceiverKeysPublic {
+        if let Some(cryptoidentity) = CRYPTOIDENTITIES.lock().unwrap().get(&user_id) {
+            cryptoidentity.clone()
+        } else {
+            let (_, cryptoidentity) = x3dh::generate_receiver_keys("bycrypto").unwrap();
+            CRYPTOIDENTITIES.lock().unwrap().insert(user_id, cryptoidentity.clone());
+            cryptoidentity
+        }
+    }
+
     #[test]
     fn create_accounts() {
         db_test(0, || {
@@ -947,29 +984,45 @@ mod tests {
             }
             DB.create_account(
                 &[1],
+                cryptoidentity_for(1),
                 &[],
                 Some("some_email@example.com"),
                 Some("The first User"),
-            )
-            .unwrap();
+            ).unwrap();
             assert!(!DB.is_valid_user_id(0).unwrap());
             assert!(DB.is_valid_user_id(1).unwrap());
             assert!(!DB.is_valid_user_id(2).unwrap());
-            DB.create_account(&[2], &[], None, Some("The second user"))
-                .unwrap();
+            DB.create_account(
+                &[2],
+                cryptoidentity_for(2),
+                &[],
+                None,
+                Some("The second user"),
+            ).unwrap();
             assert!(!DB.is_valid_user_id(0).unwrap());
             assert!(DB.is_valid_user_id(1).unwrap());
             assert!(DB.is_valid_user_id(2).unwrap());
             assert!(!DB.is_valid_user_id(3).unwrap());
-            DB.create_account(&[3], &[], Some("third_user@example.com"), None)
-                .unwrap();
+            DB.create_account(
+                &[3],
+                cryptoidentity_for(3),
+                &[],
+                Some("third_user@example.com"),
+                None,
+            ).unwrap();
             assert!(!DB.is_valid_user_id(0).unwrap());
             assert!(DB.is_valid_user_id(1).unwrap());
             assert!(DB.is_valid_user_id(2).unwrap());
             assert!(DB.is_valid_user_id(3).unwrap());
             assert!(!DB.is_valid_user_id(4).unwrap());
             assert!(DB.get_user_by_id(4).unwrap().is_none());
-            DB.create_account(&[4], &[], None, None).unwrap();
+            DB.create_account(
+                &[4],
+                cryptoidentity_for(4),
+                &[],
+                None,
+                None,
+            ).unwrap();
             assert_eq!(DB.get_user_by_id(4).unwrap().unwrap().id, 4);
             assert!(!DB.is_valid_user_id(0).unwrap());
             assert!(DB.is_valid_user_id(1).unwrap());
@@ -979,11 +1032,11 @@ mod tests {
             assert!(!DB.is_valid_user_id(5).unwrap());
             DB.create_account(
                 &[5],
+                cryptoidentity_for(5),
                 &[],
                 Some("different_account@example.com"),
                 Some("Account 5"),
-            )
-            .unwrap();
+            ).unwrap();
             assert!(!DB.is_valid_user_id(0).unwrap());
             assert!(DB.is_valid_user_id(1).unwrap());
             assert!(DB.is_valid_user_id(2).unwrap());
@@ -1002,6 +1055,7 @@ mod tests {
                 vec![
                     Account {
                         id: 1,
+                        cryptoidentity: cryptoidentity_for(1),
                         public_key: Box::new([1]),
                         encrypted_private_info: Box::new([]),
                         email: Some("some_email@example.com".to_owned()),
@@ -1009,6 +1063,7 @@ mod tests {
                     },
                     Account {
                         id: 2,
+                        cryptoidentity: cryptoidentity_for(2),
                         public_key: Box::new([2]),
                         encrypted_private_info: Box::new([]),
                         email: None,
@@ -1016,6 +1071,7 @@ mod tests {
                     },
                     Account {
                         id: 3,
+                        cryptoidentity: cryptoidentity_for(3),
                         public_key: Box::new([3]),
                         encrypted_private_info: Box::new([]),
                         email: Some("third_user@example.com".to_owned()),
@@ -1028,6 +1084,7 @@ mod tests {
                 vec![
                     Account {
                         id: 1,
+                        cryptoidentity: cryptoidentity_for(1),
                         public_key: Box::new([1]),
                         encrypted_private_info: Box::new([]),
                         email: Some("some_email@example.com".to_owned()),
@@ -1035,6 +1092,7 @@ mod tests {
                     },
                     Account {
                         id: 3,
+                        cryptoidentity: cryptoidentity_for(3),
                         public_key: Box::new([3]),
                         encrypted_private_info: Box::new([]),
                         email: Some("third_user@example.com".to_owned()),
@@ -1066,42 +1124,42 @@ mod tests {
                 id: 1,
                 initiator_id: 1,
                 other_id: 2,
-                encrypted: false,
+                encryption_data: None,
             };
             let invite2 = DmInvite {
                 id: 2,
                 initiator_id: 3,
                 other_id: 2,
-                encrypted: false,
+                encryption_data: None,
             };
             let invite3 = DmInvite {
                 id: 3,
                 initiator_id: 3,
                 other_id: 1,
-                encrypted: false,
+                encryption_data: None,
             };
-            DB.add_dm_invite(invite1.initiator_id, invite1.other_id, invite1.encrypted)
+            DB.add_dm_invite(invite1.initiator_id, invite1.other_id, invite1.encryption_data.as_deref())
                 .unwrap();
-            DB.add_dm_invite(invite2.initiator_id, invite2.other_id, invite2.encrypted)
+            DB.add_dm_invite(invite2.initiator_id, invite2.other_id, invite2.encryption_data.as_deref())
                 .unwrap();
-            DB.add_dm_invite(invite3.initiator_id, invite3.other_id, invite3.encrypted)
+            DB.add_dm_invite(invite3.initiator_id, invite3.other_id, invite3.encryption_data.as_deref())
                 .unwrap();
-            assert_eq!(DB.get_sent_dm_invites(1).unwrap(), vec![invite1]);
-            assert_eq!(DB.get_received_dm_invites(1).unwrap(), vec![invite3]);
+            assert_eq!(DB.get_sent_dm_invites(1).unwrap(), vec![invite1.clone()]);
+            assert_eq!(DB.get_received_dm_invites(1).unwrap(), vec![invite3.clone()]);
             assert_eq!(DB.get_sent_dm_invites(2).unwrap(), vec![]);
             assert_eq!(
                 DB.get_received_dm_invites(2).unwrap(),
-                vec![invite2, invite1]
+                vec![invite2.clone(), invite1.clone()]
             );
-            assert_eq!(DB.get_sent_dm_invites(3).unwrap(), vec![invite3, invite2]);
+            assert_eq!(DB.get_sent_dm_invites(3).unwrap(), vec![invite3, invite2.clone()]);
             assert_eq!(DB.get_received_dm_invites(3).unwrap(), vec![]);
             DB.remove_dm_invite(3).unwrap();
-            assert_eq!(DB.get_sent_dm_invites(1).unwrap(), vec![invite1]);
+            assert_eq!(DB.get_sent_dm_invites(1).unwrap(), vec![invite1.clone()]);
             assert_eq!(DB.get_received_dm_invites(1).unwrap(), vec![]);
             assert_eq!(DB.get_sent_dm_invites(2).unwrap(), vec![]);
             assert_eq!(
                 DB.get_received_dm_invites(2).unwrap(),
-                vec![invite2, invite1]
+                vec![invite2.clone(), invite1]
             );
             assert_eq!(DB.get_sent_dm_invites(3).unwrap(), vec![invite2]);
             assert_eq!(DB.get_received_dm_invites(3).unwrap(), vec![]);

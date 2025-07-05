@@ -17,7 +17,7 @@ use shared::crypto::PublicKey;
 use shared::limits::LIMITS;
 #[cfg(feature = "server")]
 use shared::types::GroupPermissions;
-use shared::types::UserIcon;
+use shared::{crypto::x3dh::X3DhReceiverKeysPublic, types::UserIcon};
 
 #[cfg(feature = "server")]
 use crate::secret::db::DB;
@@ -116,6 +116,7 @@ impl Display for ServerError {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct Account {
     pub id: u64,
+    pub cryptoidentity: X3DhReceiverKeysPublic,
     pub public_key: Box<[u8]>,
     pub encrypted_private_info: Box<[u8]>,
     pub email: Option<String>,
@@ -124,6 +125,7 @@ pub struct Account {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct UserAccount {
+    pub cryptoidentity: X3DhReceiverKeysPublic,
     pub public_key: Box<[u8]>,
     pub email: Option<String>,
     pub username: Option<String>,
@@ -133,6 +135,7 @@ pub struct UserAccount {
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct FoundAccount {
     pub id: u64,
+    pub cryptoidentity: X3DhReceiverKeysPublic,
     pub public_key: Box<[u8]>,
     pub username: Option<String>,
     pub email: Option<String>,
@@ -173,12 +176,12 @@ pub struct AccountCredentials {
     pub session_token: [u8; 32],
 }
 
-#[derive(Debug, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct DmInvite {
     pub id: u64,
     pub initiator_id: u64,
     pub other_id: u64,
-    pub encrypted: bool,
+    pub encryption_data: Option<Box<[u8]>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -188,6 +191,7 @@ pub struct GroupInvite {
     pub invited_id: u64,
     pub group_id: u64,
     pub permissions: Box<[u8]>,
+    pub encryption_data: Option<Box<[u8]>>,
 }
 
 /// Describes parameters of a requested session.
@@ -269,6 +273,7 @@ pub async fn create_account(
     email: String,
     username: String,
     public_key: Box<[u8]>,
+    cryptoidentity: X3DhReceiverKeysPublic,
 ) -> Result<(u64, [u8; 32]), ServerFnError<ServerError>> {
     if email.len() > LIMITS.max_email_length
         || public_key.len() > LIMITS.max_public_key_length
@@ -281,6 +286,7 @@ pub async fn create_account(
 
     match DB.create_account(
         &public_key,
+        cryptoidentity,
         &[],
         Some(&email),
         if username.is_empty() {
@@ -502,6 +508,7 @@ pub async fn find_user(
             for account in result {
                 found_accounts.push(FoundAccount {
                     id: account.id,
+                    cryptoidentity: account.cryptoidentity,
                     public_key: account.public_key,
                     username: account.username,
                     email: account.email,
@@ -608,7 +615,7 @@ pub async fn fetch_new_dm_messages(
 #[server(endpoint = "send_dm_invite")]
 pub async fn send_dm_invite(
     other_id: u64,
-    encrypted: bool,
+    encryption_data: Option<Box<[u8]>>,
     credentials: AccountCredentials,
 ) -> Result<u64, ServerFnError<ServerError>> {
     check_session(credentials)?;
@@ -618,7 +625,7 @@ pub async fn send_dm_invite(
         return Err(ServerFnError::WrappedServerError(ServerError::InvalidValue));
     }
 
-    match DB.add_dm_invite(credentials.id, other_id, encrypted) {
+    match DB.add_dm_invite(credentials.id, other_id, encryption_data.as_deref()) {
         Ok(id) => Ok(id),
         Err(err) => {
             error!("Failed to send DM invite: {err:?}");
@@ -650,7 +657,7 @@ pub async fn accept_dm_invite(
         return Err(ServerFnError::WrappedServerError(ServerError::Forbidden));
     }
 
-    let group_id = match DB.create_dm_group(invite.initiator_id, invite.other_id, invite.encrypted)
+    let group_id = match DB.create_dm_group(invite.initiator_id, invite.other_id, invite.encryption_data.is_some())
     {
         Ok(id) => id,
         Err(err) => {
@@ -811,6 +818,7 @@ pub async fn get_user_data(
     match DB.get_user_by_id(user_id) {
         Ok(Some(account)) => Ok(Some(UserAccount {
             public_key: account.public_key,
+            cryptoidentity: account.cryptoidentity,
             email: account.email,
             username: account.username,
             icon,
@@ -975,12 +983,13 @@ pub async fn send_group_invite(
     group_id: u64,
     permissions: Box<[u8]>,
     credentials: AccountCredentials,
+    encryption_data: Option<Box<[u8]>>,
 ) -> Result<u64, ServerFnError<ServerError>> {
     check_session(credentials)?;
     check_is_in_group(credentials.id, group_id)?;
     check_is_not_in_group(user_id, group_id)?;
 
-    match DB.add_group_invite(credentials.id, user_id, group_id, &permissions) {
+    match DB.add_group_invite(credentials.id, user_id, group_id, &permissions, encryption_data.as_deref()) {
         Ok(invite_id) => Ok(invite_id),
         Err(err) => {
             error!("Failed to send group invite to user {user_id}: {err:?}");

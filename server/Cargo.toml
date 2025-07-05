@@ -11,6 +11,7 @@ shared = { workspace = true }
 chrono = { workspace = true }
 mysql = { version = "26.0.0", features = ["chrono"] }
 rand = "0.9.1"
+postcard = { workspace = true }
 
 [features]
 default = []

@@ -4673,6 +4673,7 @@ dependencies = [
  "chrono",
  "dioxus",
  "mysql",
+ "postcard",
  "rand 0.9.1",
  "serde",
  "shared",

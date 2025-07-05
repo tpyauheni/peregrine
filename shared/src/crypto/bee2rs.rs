@@ -6,7 +6,7 @@ use super::{
 };
 use bee2_rs::{
     bash_hash::Bash512,
-    belt::{BeltDwp, BeltEncryptionAlgorithm, BeltKey256},
+    belt::{BeltDwp, BeltEncryptionAlgorithm, BeltKey128, BeltKey192, BeltKey256},
     bign::{BignKey, BignParameters, BignParametersConfiguration},
     brng::{Brng, CtrRng},
     errors::Bee2Result,
@@ -180,24 +180,24 @@ impl RandomNumberGenerator for CtrRng {
 
 pub type DefaultRng = CtrRng;
 
-pub(crate) fn rng() -> DefaultRng {
+pub(super) fn rng() -> DefaultRng {
     CtrRng::new(get_iv(), None)
 }
 
 pub type CryptoSet = CryptographyAlgorithmSet<DefaultRng, Belt256, Bign, Pbkdf2, Bash512>;
 
-pub(crate) fn cryptoset(password: &[u8], iv: [u8; 32]) -> CryptoSet {
+pub(super) fn cryptoset(password: &[u8], iv: [u8; 32]) -> CryptoSet {
     let mut kdf = Pbkdf2 {};
     let hash = Bash512::new();
     let rng = CtrRng::new(kdf.as_symmetric_key(password).key, Some(iv));
     CryptographyAlgorithmSet::new(kdf, hash, rng, password)
 }
 
-pub(crate) fn hash(data: &[u8]) -> Box<[u8]> {
+pub(super) fn hash(data: &[u8]) -> Box<[u8]> {
     Bash512::hash(data).unwrap()
 }
 
-pub(crate) fn generate_keypair() -> (PrivateKey, PublicKey) {
+pub(super) fn generate_keypair() -> (PrivateKey, PublicKey) {
     let key = BignKey::try_new(
         BignParameters::try_new(BignParametersConfiguration::B3).unwrap(),
         &mut rng(),
@@ -211,7 +211,7 @@ pub(crate) fn generate_keypair() -> (PrivateKey, PublicKey) {
     )
 }
 
-pub(crate) fn sign(private_key: PrivateKey, public_key: PublicKey, hash: &[u8]) -> Box<[u8]> {
+pub(super) fn sign(private_key: PrivateKey, public_key: PublicKey, hash: &[u8]) -> Box<[u8]> {
     let key = BignKey::try_load(
         BignParameters::try_new(BignParametersConfiguration::B3).unwrap(),
         &public_key.pk,
@@ -221,7 +221,7 @@ pub(crate) fn sign(private_key: PrivateKey, public_key: PublicKey, hash: &[u8]) 
     key.sign(hash, &mut rng()).unwrap()
 }
 
-pub(crate) fn verify(public_key: PublicKey, hash: &[u8], signature: &[u8]) -> bool {
+pub(super) fn verify(public_key: PublicKey, hash: &[u8], signature: &[u8]) -> bool {
     let key = BignKey {
         private_key: Box::new([]),
         public_key: Box::new([]),
@@ -230,7 +230,7 @@ pub(crate) fn verify(public_key: PublicKey, hash: &[u8], signature: &[u8]) -> bo
     key.verify(&public_key.pk, hash, signature).is_ok()
 }
 
-pub(crate) fn diffie_hellman(
+pub(super) fn diffie_hellman(
     self_private_key: PrivateKey,
     self_public_key: PublicKey,
     other_public_key: PublicKey,
@@ -245,7 +245,7 @@ pub(crate) fn diffie_hellman(
 }
 
 // TODO: Add to upstream library.
-pub(crate) fn kdf(data: &[u8], result_len: usize) -> Box<[u8]> {
+pub(super) fn kdf(data: &[u8], result_len: usize) -> Box<[u8]> {
     let mut result = vec![];
 
     for _ in 0..=result_len / 32 {
@@ -267,7 +267,7 @@ pub(crate) fn kdf(data: &[u8], result_len: usize) -> Box<[u8]> {
     Box::from(&result[..result_len])
 }
 
-pub(crate) fn aead_wrap(
+pub(super) fn aead_wrap(
     plaintext: &[u8],
     key: PrivateKey,
     public_data: &[u8],
@@ -278,7 +278,7 @@ pub(crate) fn aead_wrap(
     (ciphertext, Box::from(mac))
 }
 
-pub(crate) fn aead_unwrap(
+pub(super) fn aead_unwrap(
     ciphertext: &[u8],
     public_data: &[u8],
     mac: &[u8],
@@ -287,4 +287,48 @@ pub(crate) fn aead_unwrap(
     let key = BeltKey256::new(((&key.sk) as &[u8]).try_into().unwrap());
     let iv = key.clone().to_key128().get_bytes();
     BeltDwp::unwrap(ciphertext, public_data, mac.try_into().unwrap(), &key, *iv).ok()
+}
+
+pub(super) fn symmetric_encrypt(
+    plaintext: &[u8],
+    key: &[u8],
+) -> Box<[u8]> {
+    let iv = get_iv();
+    if key.len() == 32 {
+        let key = BeltKey256::new(key.try_into().unwrap());
+        let mut ctr = key.ctr(iv[..16].try_into().unwrap());
+        ctr.encrypt(plaintext)
+    } else if key.len() == 24 {
+        let key = BeltKey192::new(key.try_into().unwrap());
+        let mut ctr = key.ctr(iv[..16].try_into().unwrap());
+        ctr.encrypt(plaintext)
+    } else if key.len() == 16 {
+        let key = BeltKey128::new(key.try_into().unwrap());
+        let mut ctr = key.ctr(iv[..16].try_into().unwrap());
+        ctr.encrypt(plaintext)
+    } else {
+        panic!();
+    }
+}
+
+pub(super) fn symmetric_decrypt(
+    ciphertext: Box<[u8]>,
+    key: &[u8],
+) -> Option<Box<[u8]>> {
+    let iv = get_iv();
+    if key.len() == 32 {
+        let key = BeltKey256::new(key.try_into().unwrap());
+        let mut ctr = key.ctr(iv[..16].try_into().unwrap());
+        ctr.decrypt(ciphertext).ok()
+    } else if key.len() == 24 {
+        let key = BeltKey192::new(key.try_into().unwrap());
+        let mut ctr = key.ctr(iv[..16].try_into().unwrap());
+        ctr.decrypt(ciphertext).ok()
+    } else if key.len() == 16 {
+        let key = BeltKey128::new(key.try_into().unwrap());
+        let mut ctr = key.ctr(iv[..16].try_into().unwrap());
+        ctr.decrypt(ciphertext).ok()
+    } else {
+        panic!();
+    }
 }
