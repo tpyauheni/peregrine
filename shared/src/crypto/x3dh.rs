@@ -260,13 +260,15 @@ mod tests {
             random_keys_a.0.ik,
             random_keys_a.1.ik.clone(),
             random_keys_b.1.clone(),
-        ).unwrap();
+        )
+        .unwrap();
         let decoded_data = decode_x3dh(
             encode_data,
             random_keys_a.1.ik,
             random_keys_b.1,
             random_keys_b.0,
-        ).unwrap();
+        )
+        .unwrap();
         assert_eq!(*message, *decoded_data);
     }
 }

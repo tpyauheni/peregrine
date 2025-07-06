@@ -1,4 +1,4 @@
-use crate::crypto::{get_iv, KeyStrength, PrivateKey, PublicKey};
+use crate::crypto::{KeyStrength, PrivateKey, PublicKey, get_iv};
 
 use super::{
     AsymmetricCipher, AsymmetricCipherPrivate, AsymmetricCipherPublic, CryptographyAlgorithmSet,
@@ -289,10 +289,7 @@ pub(super) fn aead_unwrap(
     BeltDwp::unwrap(ciphertext, public_data, mac.try_into().unwrap(), &key, *iv).ok()
 }
 
-pub(super) fn symmetric_encrypt(
-    plaintext: &[u8],
-    key: &[u8],
-) -> Box<[u8]> {
+pub(super) fn symmetric_encrypt(plaintext: &[u8], key: &[u8]) -> Box<[u8]> {
     let iv = get_iv();
     if key.len() == 32 {
         let key = BeltKey256::new(key.try_into().unwrap());
@@ -311,10 +308,7 @@ pub(super) fn symmetric_encrypt(
     }
 }
 
-pub(super) fn symmetric_decrypt(
-    ciphertext: Box<[u8]>,
-    key: &[u8],
-) -> Option<Box<[u8]>> {
+pub(super) fn symmetric_decrypt(ciphertext: Box<[u8]>, key: &[u8]) -> Option<Box<[u8]>> {
     let iv = get_iv();
     if key.len() == 32 {
         let key = BeltKey256::new(key.try_into().unwrap());

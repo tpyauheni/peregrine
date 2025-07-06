@@ -657,8 +657,11 @@ pub async fn accept_dm_invite(
         return Err(ServerFnError::WrappedServerError(ServerError::Forbidden));
     }
 
-    let group_id = match DB.create_dm_group(invite.initiator_id, invite.other_id, invite.encryption_data.is_some())
-    {
+    let group_id = match DB.create_dm_group(
+        invite.initiator_id,
+        invite.other_id,
+        invite.encryption_data.is_some(),
+    ) {
         Ok(id) => id,
         Err(err) => {
             error!("Failed to create DM group while trying to accept invite: {err:?}");
@@ -949,25 +952,16 @@ pub fn check_is_not_in_group(
 }
 
 #[cfg(feature = "server")]
-pub fn check_is_group_admin(
-    group_id: u64,
-    user_id: u64,
-) -> Result<(), ServerFnError<ServerError>> {
+pub fn check_is_group_admin(group_id: u64, user_id: u64) -> Result<(), ServerFnError<ServerError>> {
     match DB.get_group_member_permissions(group_id, user_id) {
         Ok(Some(permissions)) => {
             if permissions.is_admin() {
                 Ok(())
             } else {
-                Err(ServerFnError::WrappedServerError(
-                    ServerError::Forbidden,
-                ))
+                Err(ServerFnError::WrappedServerError(ServerError::Forbidden))
             }
         }
-        Ok(None) => {
-            Err(ServerFnError::WrappedServerError(
-                ServerError::Forbidden,
-            ))
-        }
+        Ok(None) => Err(ServerFnError::WrappedServerError(ServerError::Forbidden)),
         Err(err) => {
             error!("Failed to check whether the user is the group admin or not: {err:?}");
             Err(ServerFnError::WrappedServerError(
@@ -989,7 +983,13 @@ pub async fn send_group_invite(
     check_is_in_group(credentials.id, group_id)?;
     check_is_not_in_group(user_id, group_id)?;
 
-    match DB.add_group_invite(credentials.id, user_id, group_id, &permissions, encryption_data.as_deref()) {
+    match DB.add_group_invite(
+        credentials.id,
+        user_id,
+        group_id,
+        &permissions,
+        encryption_data.as_deref(),
+    ) {
         Ok(invite_id) => Ok(invite_id),
         Err(err) => {
             error!("Failed to send group invite to user {user_id}: {err:?}");
@@ -1298,7 +1298,9 @@ pub async fn kick_group_member(
     check_is_group_admin(group_id, credentials.id)?;
 
     if credentials.id == user_id {
-        return Err(ServerFnError::WrappedServerError(ServerError::ActionOnSelfIsForbidden));
+        return Err(ServerFnError::WrappedServerError(
+            ServerError::ActionOnSelfIsForbidden,
+        ));
     }
 
     match DB.remove_group_member(group_id, user_id) {
@@ -1322,7 +1324,9 @@ pub async fn promote_group_member(
     check_is_group_admin(group_id, credentials.id)?;
 
     if credentials.id == user_id {
-        return Err(ServerFnError::WrappedServerError(ServerError::ActionOnSelfIsForbidden));
+        return Err(ServerFnError::WrappedServerError(
+            ServerError::ActionOnSelfIsForbidden,
+        ));
     }
 
     match DB.set_group_member_permissions(group_id, user_id, GroupPermissions::admin()) {
@@ -1346,7 +1350,9 @@ pub async fn demote_group_member(
     check_is_group_admin(group_id, credentials.id)?;
 
     if credentials.id == user_id {
-        return Err(ServerFnError::WrappedServerError(ServerError::ActionOnSelfIsForbidden));
+        return Err(ServerFnError::WrappedServerError(
+            ServerError::ActionOnSelfIsForbidden,
+        ));
     }
 
     match DB.set_group_member_permissions(group_id, user_id, GroupPermissions::default()) {

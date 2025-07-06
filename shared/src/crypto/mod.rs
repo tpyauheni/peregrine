@@ -233,11 +233,7 @@ pub fn aead_unwrap(
     }
 }
 
-pub fn symmetric_encrypt(
-    alg_name: &str,
-    plaintext: &[u8],
-    key: &[u8],
-) -> Option<Box<[u8]>> {
+pub fn symmetric_encrypt(alg_name: &str, plaintext: &[u8], key: &[u8]) -> Option<Box<[u8]>> {
     match alg_name {
         #[cfg(feature = "bee2-rs")]
         "bycrypto" => Some(bee2rs::symmetric_encrypt(plaintext, key)),

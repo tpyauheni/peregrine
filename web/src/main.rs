@@ -1,6 +1,5 @@
-use dioxus::prelude::*;
 use dioxus::logger::tracing::Level;
-
+use dioxus::prelude::*;
 
 use ui::Navbar;
 use views::{Blog, Home};

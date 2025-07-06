@@ -172,10 +172,14 @@ pub fn RegisterAccount() -> Element {
         );
         error_sig.set(None);
         let (_, x3dh_public) = STORAGE.x3dh_data(crypto::preferred_alogirthm());
-        let (account_id, session_token) =
-            server::create_account(email.to_owned(), username.to_owned(), public_key, x3dh_public)
-                .await
-                .unwrap();
+        let (account_id, session_token) = server::create_account(
+            email.to_owned(),
+            username.to_owned(),
+            public_key,
+            x3dh_public,
+        )
+        .await
+        .unwrap();
         let login_credentials = AccountCredentials {
             id: account_id,
             session_token,

@@ -1,7 +1,8 @@
 use client::{
     cache::CACHE,
     future_retry_loop,
-    packet_sender::{PacketSender, PacketState}, storage::STORAGE,
+    packet_sender::{PacketSender, PacketState},
+    storage::STORAGE,
 };
 use dioxus::prelude::*;
 use dioxus_free_icons::icons::go_icons::{
@@ -9,7 +10,10 @@ use dioxus_free_icons::icons::go_icons::{
 };
 use postcard::from_bytes;
 use server::{AccountCredentials, DmInvite, GroupInvite, UserAccount};
-use shared::crypto::{self, x3dh::{self, X3DhData}};
+use shared::crypto::{
+    self,
+    x3dh::{self, X3DhData},
+};
 
 #[derive(Clone, Copy)]
 enum Tab {
@@ -320,7 +324,12 @@ fn SentInvite(invite: Invite, credentials: AccountCredentials) -> Element {
     }
 }
 
-fn get_shared_key(id: u64, encryption_data: Option<Box<[u8]>>, user_data: PacketState<Option<UserAccount>>, for_dm: bool) -> Option<Box<[u8]>> {
+fn get_shared_key(
+    id: u64,
+    encryption_data: Option<Box<[u8]>>,
+    user_data: PacketState<Option<UserAccount>>,
+    for_dm: bool,
+) -> Option<Box<[u8]>> {
     let PacketState::Response(Some(user)) = user_data else {
         return None;
     };
@@ -329,7 +338,8 @@ fn get_shared_key(id: u64, encryption_data: Option<Box<[u8]>>, user_data: Packet
     // TODO: Get `crypto_alg` from `encryption_data`.
     let crypto_alg = crypto::preferred_alogirthm();
     let (private_keys, public_keys) = STORAGE.x3dh_data(crypto_alg);
-    let shared_key = x3dh::decode_x3dh(x3dh_data, user.cryptoidentity.ik, public_keys, private_keys).ok()?;
+    let shared_key =
+        x3dh::decode_x3dh(x3dh_data, user.cryptoidentity.ik, public_keys, private_keys).ok()?;
     if for_dm {
         STORAGE.store_dm_key(id, (crypto_alg, &shared_key));
     } else {
@@ -360,11 +370,17 @@ fn ReceivedInvite(invite: Invite, credentials: AccountCredentials) -> Element {
             let (valid_shared_key, id) = match invite {
                 Invite::Conversation(invite) => {
                     let id = invite.initiator_id;
-                    (get_shared_key(id, invite.encryption_data, user_data(), true).is_some(), id)
+                    (
+                        get_shared_key(id, invite.encryption_data, user_data(), true).is_some(),
+                        id,
+                    )
                 }
                 Invite::Group(invite) => {
                     let id = invite.group_id;
-                    (get_shared_key(id, invite.encryption_data, user_data(), false).is_some(), id)
+                    (
+                        get_shared_key(id, invite.encryption_data, user_data(), false).is_some(),
+                        id,
+                    )
                 }
             };
             if !valid_shared_key {

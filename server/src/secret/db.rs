@@ -2,15 +2,15 @@ use crate::{
     Account, DmGroup, DmInvite, DmMessage, GroupInvite, GroupMember, GroupMessage, MessageStatus,
     MultiUserGroup,
 };
-use shared::{types::GroupPermissions, crypto::x3dh::{X3DhReceiverKeysPublic}};
 use shared::limits::LIMITS;
+use shared::{crypto::x3dh::X3DhReceiverKeysPublic, types::GroupPermissions};
 
 use std::sync::{Arc, LazyLock, Mutex};
 
 use mysql::prelude::*;
 use mysql::{Pool, Row, params};
-use rand::{SeedableRng, rngs::StdRng};
 use postcard::{from_bytes, to_allocvec};
+use rand::{SeedableRng, rngs::StdRng};
 
 #[derive(Debug, Clone)]
 pub struct Database {
@@ -168,7 +168,13 @@ impl Database {
                 `email`,
                 `username`
             ) VALUES (?, ?, ?, ?, ?);",
-            (public_key, to_allocvec(&public_x3dh_data)?, encrypted_private_info, email, username),
+            (
+                public_key,
+                to_allocvec(&public_x3dh_data)?,
+                encrypted_private_info,
+                email,
+                username,
+            ),
         )?;
         // `LAST_INSERT_ID()` returns the last id only for the current Pool connection.
         Ok(conn.query_first("SELECT LAST_INSERT_ID();")?.unwrap())
@@ -214,7 +220,7 @@ impl Database {
                 query,
                 ignore_user,
             },
-            |(id, cryptoidentity, public_key, encrypted_private_info, email, username)| {
+            |(id, public_key, cryptoidentity, encrypted_private_info, email, username)| {
                 if let Ok(cryptoidentity) = from_bytes(&cryptoidentity as &Box<[u8]>) {
                     accounts.push(Account {
                         id,
@@ -416,13 +422,11 @@ impl Database {
                 ORDER BY `id` DESC
                 LIMIT 30;",
             (id,),
-            |(id, initiator_id, other_id, encryption_data)| {
-                DmInvite {
-                    id,
-                    initiator_id,
-                    other_id,
-                    encryption_data,
-                }
+            |(id, initiator_id, other_id, encryption_data)| DmInvite {
+                id,
+                initiator_id,
+                other_id,
+                encryption_data,
             },
         )?;
         Ok(value)
@@ -438,13 +442,11 @@ impl Database {
                 ORDER BY `id` DESC
                 LIMIT 30;",
             (id,),
-            |(id, initiator_id, other_id, encryption_data)| {
-                DmInvite {
-                    id,
-                    initiator_id,
-                    other_id,
-                    encryption_data,
-                }
+            |(id, initiator_id, other_id, encryption_data)| DmInvite {
+                id,
+                initiator_id,
+                other_id,
+                encryption_data,
             },
         )?;
         Ok(value)
@@ -491,12 +493,12 @@ impl Database {
             return Ok(None);
         };
         let _: Row = user;
-        let cryptoidentity: Box<[u8]> = user.take_opt(1).unwrap()?;
+        let cryptoidentity: Box<[u8]> = user.take_opt(2).unwrap()?;
         let cryptoidentity = from_bytes(&cryptoidentity)?;
         Ok(Some(Account {
             id: user.take_opt(0).unwrap()?,
             cryptoidentity,
-            public_key: user.take_opt(2).unwrap()?,
+            public_key: user.take_opt(1).unwrap()?,
             encrypted_private_info: user.take_opt(3).unwrap()?,
             email: user.take_opt(4).unwrap()?,
             username: user.take_opt(5).unwrap()?,
@@ -648,7 +650,13 @@ impl Database {
             `permissions`,
             `encryption_data`
         ) VALUES (?, ?, ?, ?);",
-            (inviter_id, invited_id, group_id, permissions, encryption_data),
+            (
+                inviter_id,
+                invited_id,
+                group_id,
+                permissions,
+                encryption_data,
+            ),
         )?;
         Ok(conn.query_first("SELECT LAST_INSERT_ID();")?.unwrap())
     }
@@ -891,7 +899,8 @@ impl Database {
             WHERE `group_id` = ?
                 AND `user_id` = ?;",
             (group_id, user_id),
-        )? else {
+        )?
+        else {
             return Ok(None);
         };
         let _: Box<[u8]> = permission_bytes;
@@ -937,18 +946,22 @@ pub mod rng {
 
 #[cfg(test)]
 mod tests {
-    use std::{sync::{LazyLock, Mutex, Once}, collections::HashMap};
+    use std::{
+        collections::HashMap,
+        sync::{LazyLock, Mutex, Once},
+    };
 
     use crate::{DmInvite, MessageStatus, secret::db::Account};
 
     use super::Database;
-    use shared::crypto::x3dh::{X3DhReceiverKeysPublic, self};
+    use shared::crypto::x3dh::{self, X3DhReceiverKeysPublic};
 
     static DB: LazyLock<Database> =
         LazyLock::new(|| Database::new(&std::env::var("TEST_DB_URL").unwrap()));
     static INIT: Once = Once::new();
     static DB_TEST_NUMBER: LazyLock<Mutex<usize>> = LazyLock::new(|| Mutex::new(0));
-    static CRYPTOIDENTITIES: LazyLock<Mutex<HashMap<u64, X3DhReceiverKeysPublic>>> = LazyLock::new(|| Mutex::new(HashMap::new()));
+    static CRYPTOIDENTITIES: LazyLock<Mutex<HashMap<u64, X3DhReceiverKeysPublic>>> =
+        LazyLock::new(|| Mutex::new(HashMap::new()));
 
     fn db_test(test_number: usize, test_fn: fn()) {
         INIT.call_once(|| {
@@ -971,7 +984,10 @@ mod tests {
             cryptoidentity.clone()
         } else {
             let (_, cryptoidentity) = x3dh::generate_receiver_keys("bycrypto").unwrap();
-            CRYPTOIDENTITIES.lock().unwrap().insert(user_id, cryptoidentity.clone());
+            CRYPTOIDENTITIES
+                .lock()
+                .unwrap()
+                .insert(user_id, cryptoidentity.clone());
             cryptoidentity
         }
     }
@@ -988,7 +1004,8 @@ mod tests {
                 &[],
                 Some("some_email@example.com"),
                 Some("The first User"),
-            ).unwrap();
+            )
+            .unwrap();
             assert!(!DB.is_valid_user_id(0).unwrap());
             assert!(DB.is_valid_user_id(1).unwrap());
             assert!(!DB.is_valid_user_id(2).unwrap());
@@ -998,7 +1015,8 @@ mod tests {
                 &[],
                 None,
                 Some("The second user"),
-            ).unwrap();
+            )
+            .unwrap();
             assert!(!DB.is_valid_user_id(0).unwrap());
             assert!(DB.is_valid_user_id(1).unwrap());
             assert!(DB.is_valid_user_id(2).unwrap());
@@ -1009,20 +1027,16 @@ mod tests {
                 &[],
                 Some("third_user@example.com"),
                 None,
-            ).unwrap();
+            )
+            .unwrap();
             assert!(!DB.is_valid_user_id(0).unwrap());
             assert!(DB.is_valid_user_id(1).unwrap());
             assert!(DB.is_valid_user_id(2).unwrap());
             assert!(DB.is_valid_user_id(3).unwrap());
             assert!(!DB.is_valid_user_id(4).unwrap());
             assert!(DB.get_user_by_id(4).unwrap().is_none());
-            DB.create_account(
-                &[4],
-                cryptoidentity_for(4),
-                &[],
-                None,
-                None,
-            ).unwrap();
+            DB.create_account(&[4], cryptoidentity_for(4), &[], None, None)
+                .unwrap();
             assert_eq!(DB.get_user_by_id(4).unwrap().unwrap().id, 4);
             assert!(!DB.is_valid_user_id(0).unwrap());
             assert!(DB.is_valid_user_id(1).unwrap());
@@ -1036,7 +1050,8 @@ mod tests {
                 &[],
                 Some("different_account@example.com"),
                 Some("Account 5"),
-            ).unwrap();
+            )
+            .unwrap();
             assert!(!DB.is_valid_user_id(0).unwrap());
             assert!(DB.is_valid_user_id(1).unwrap());
             assert!(DB.is_valid_user_id(2).unwrap());
@@ -1138,20 +1153,38 @@ mod tests {
                 other_id: 1,
                 encryption_data: None,
             };
-            DB.add_dm_invite(invite1.initiator_id, invite1.other_id, invite1.encryption_data.as_deref())
-                .unwrap();
-            DB.add_dm_invite(invite2.initiator_id, invite2.other_id, invite2.encryption_data.as_deref())
-                .unwrap();
-            DB.add_dm_invite(invite3.initiator_id, invite3.other_id, invite3.encryption_data.as_deref())
-                .unwrap();
+            DB.add_dm_invite(
+                invite1.initiator_id,
+                invite1.other_id,
+                invite1.encryption_data.as_deref(),
+            )
+            .unwrap();
+            DB.add_dm_invite(
+                invite2.initiator_id,
+                invite2.other_id,
+                invite2.encryption_data.as_deref(),
+            )
+            .unwrap();
+            DB.add_dm_invite(
+                invite3.initiator_id,
+                invite3.other_id,
+                invite3.encryption_data.as_deref(),
+            )
+            .unwrap();
             assert_eq!(DB.get_sent_dm_invites(1).unwrap(), vec![invite1.clone()]);
-            assert_eq!(DB.get_received_dm_invites(1).unwrap(), vec![invite3.clone()]);
+            assert_eq!(
+                DB.get_received_dm_invites(1).unwrap(),
+                vec![invite3.clone()]
+            );
             assert_eq!(DB.get_sent_dm_invites(2).unwrap(), vec![]);
             assert_eq!(
                 DB.get_received_dm_invites(2).unwrap(),
                 vec![invite2.clone(), invite1.clone()]
             );
-            assert_eq!(DB.get_sent_dm_invites(3).unwrap(), vec![invite3, invite2.clone()]);
+            assert_eq!(
+                DB.get_sent_dm_invites(3).unwrap(),
+                vec![invite3, invite2.clone()]
+            );
             assert_eq!(DB.get_received_dm_invites(3).unwrap(), vec![]);
             DB.remove_dm_invite(3).unwrap();
             assert_eq!(DB.get_sent_dm_invites(1).unwrap(), vec![invite1.clone()]);

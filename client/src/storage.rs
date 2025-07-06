@@ -3,7 +3,10 @@ use std::{path::PathBuf, sync::LazyLock};
 use platform_dirs::AppDirs;
 use server::AccountCredentials;
 
-use shared::{crypto::x3dh::{self, X3DhReceiverKeysPrivate, X3DhReceiverKeysPublic}, storage::{GeneralStorage, RawStorage}};
+use shared::{
+    crypto::x3dh::{self, X3DhReceiverKeysPrivate, X3DhReceiverKeysPublic},
+    storage::{GeneralStorage, RawStorage},
+};
 
 pub static FALLBACK_DATA_PATH: LazyLock<PathBuf> = LazyLock::new(|| {
     let mut path = PathBuf::new();

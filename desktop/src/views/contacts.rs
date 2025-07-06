@@ -2,12 +2,12 @@ use std::{rc::Rc, time::Duration};
 
 use chrono::Local;
 use client::{cache::CACHE, future_retry_loop, packet_sender::PacketState, storage::STORAGE};
-use shared::crypto;
 use dioxus::{logger::tracing::error, prelude::*};
 use server::{
     AccountCredentials, DmGroup, DmMessage, FoundAccount, GroupMessage, MessageStatus,
     MultiUserGroup,
 };
+use shared::crypto;
 
 use crate::Route;
 
@@ -599,9 +599,7 @@ fn GroupMessagesPanel(selected_group: MultiUserGroup, credentials: AccountCreden
                             return;
                         }
                         event.prevent_default();
-                        // TODO: Encryption.
                         let content = message();
-                        let msg_bytes: Box<[u8]> = Box::from(content.clone().as_bytes());
                         let (msg_bytes, encryption_method): (Box<[u8]>, String) = if let Some((algorithm_name, key)) = STORAGE.load_group_key(selected_group.id) {
                             (
                                 crypto::symmetric_encrypt(&algorithm_name, content.as_bytes(), &key).unwrap(),
@@ -734,9 +732,11 @@ fn DmMessageComponent(contact_id: u64, message: DmMessage) -> Element {
     );
     let message_content = if message.encryption_method != "plain" {
         if let Some(key) = STORAGE.load_dm_key(contact_id) {
-            if let Some(Some(plaintext)) = crypto::symmetric_decrypt(&key.0, message.content, &key.1) {
+            if let Some(Some(plaintext)) =
+                crypto::symmetric_decrypt(&key.0, message.content, &key.1)
+            {
                 let plain_string = String::from_utf8_lossy(&plaintext);
-                rsx!({plain_string})
+                rsx!({ plain_string })
             } else {
                 rsx!(p { style: "color:#f00", "Failed to decrypt message" })
             }
@@ -745,7 +745,7 @@ fn DmMessageComponent(contact_id: u64, message: DmMessage) -> Element {
         }
     } else {
         let plain_string = String::from_utf8_lossy(&message.content);
-        rsx!({plain_string})
+        rsx!({ plain_string })
     };
     let sent_by_me = message.status != MessageStatus::SentByOther;
     let time = if let Some(time) = message.sent_time {
@@ -912,8 +912,10 @@ fn GroupMessageComponent(
     };
     let message_content = if message.encryption_method != "plain" {
         if let Some(key) = STORAGE.load_group_key(group_id) {
-            if let Some(Some(plaintext)) = crypto::symmetric_decrypt(&key.0, message.content, &key.1) {
-                rsx!({String::from_utf8_lossy(&plaintext)})
+            if let Some(Some(plaintext)) =
+                crypto::symmetric_decrypt(&key.0, message.content, &key.1)
+            {
+                rsx!({ String::from_utf8_lossy(&plaintext) })
             } else {
                 rsx!(p { style: "color:#f00", "Failed to decrypt message" })
             }
@@ -921,7 +923,7 @@ fn GroupMessageComponent(
             rsx!(p { style: "color:#f00", "Failed to decrypt message" })
         }
     } else {
-        rsx!({String::from_utf8_lossy(&message.content)})
+        rsx!({ String::from_utf8_lossy(&message.content) })
     };
     rsx! {
         {author}
