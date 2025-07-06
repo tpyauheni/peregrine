@@ -1,4 +1,4 @@
-use crate::crypto::{PrivateKey, PublicKey, get_iv};
+use crate::crypto::{get_iv, KeyStrength, PrivateKey, PublicKey};
 
 use super::{
     AsymmetricCipher, AsymmetricCipherPrivate, AsymmetricCipherPublic, CryptographyAlgorithmSet,
@@ -330,5 +330,26 @@ pub(super) fn symmetric_decrypt(
         ctr.decrypt(ciphertext).ok()
     } else {
         panic!();
+    }
+}
+
+pub fn symmetric_genkey(strength: KeyStrength) -> Box<[u8]> {
+    let mut rng = CtrRng::new(get_iv(), None);
+    match strength {
+        KeyStrength::High => {
+            let mut key: [u8; 16] = [0; _];
+            RandomNumberGenerator::next_buffer(&mut rng, &mut key);
+            Box::new(key)
+        }
+        KeyStrength::VeryHigh => {
+            let mut key: [u8; 24] = [0; _];
+            RandomNumberGenerator::next_buffer(&mut rng, &mut key);
+            Box::new(key)
+        }
+        KeyStrength::ExtremelyHigh => {
+            let mut key: [u8; 32] = [0; _];
+            RandomNumberGenerator::next_buffer(&mut rng, &mut key);
+            Box::new(key)
+        }
     }
 }

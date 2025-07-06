@@ -257,6 +257,20 @@ pub fn symmetric_decrypt(
     }
 }
 
+pub enum KeyStrength {
+    High,
+    VeryHigh,
+    ExtremelyHigh,
+}
+
+pub fn symmetric_genkey(alg_name: &str, strength: KeyStrength) -> Option<Box<[u8]>> {
+    match alg_name {
+        #[cfg(feature = "bee2-rs")]
+        "bycrypto" => Some(bee2rs::symmetric_genkey(strength)),
+        _ => None,
+    }
+}
+
 pub fn supported_algorithms() -> Vec<&'static str> {
     vec![
         #[cfg(feature = "bee2-rs")]

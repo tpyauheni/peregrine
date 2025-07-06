@@ -278,7 +278,7 @@ fn DmMessagesPanel(selected_dm_group: DmGroup, credentials: AccountCredentials) 
     let messages = if let Some(messages) = cached_messages() {
         rsx! {
             for message in messages {
-                DmMessageComponent { message }
+                DmMessageComponent { contact_id, message }
             }
         }
     } else {
@@ -287,7 +287,7 @@ fn DmMessagesPanel(selected_dm_group: DmGroup, credentials: AccountCredentials) 
                 messages.reverse();
                 rsx! {
                     for message in messages {
-                        DmMessageComponent { message }
+                        DmMessageComponent { contact_id, message }
                     }
                 }
             }
@@ -469,7 +469,7 @@ fn GroupMessagesPanel(selected_group: MultiUserGroup, credentials: AccountCreden
     let messages = if let Some(messages) = cached_messages() {
         rsx! {
             for message in messages {
-                GroupMessageComponent { message, self_id: credentials.id, credentials }
+                GroupMessageComponent { message, self_id: credentials.id, credentials, group_id: selected_group.id }
             }
         }
     } else {
@@ -478,7 +478,7 @@ fn GroupMessagesPanel(selected_group: MultiUserGroup, credentials: AccountCreden
                 messages.reverse();
                 rsx! {
                     for message in messages {
-                        GroupMessageComponent { message, self_id: credentials.id, credentials }
+                        GroupMessageComponent { message, self_id: credentials.id, credentials, group_id: selected_group.id }
                     }
                 }
             }
@@ -602,10 +602,18 @@ fn GroupMessagesPanel(selected_group: MultiUserGroup, credentials: AccountCreden
                         // TODO: Encryption.
                         let content = message();
                         let msg_bytes: Box<[u8]> = Box::from(content.clone().as_bytes());
+                        let (msg_bytes, encryption_method): (Box<[u8]>, String) = if let Some((algorithm_name, key)) = STORAGE.load_group_key(selected_group.id) {
+                            (
+                                crypto::symmetric_encrypt(&algorithm_name, content.as_bytes(), &key).unwrap(),
+                                crypto::to_encryption_method(&algorithm_name),
+                            )
+                        } else {
+                            (Box::from(content.clone().as_bytes()), "plain".to_owned())
+                        };
                         println!("Send result: {:?}", server::send_group_message(
                             selected_group.id,
-                            "plain".to_owned(),
-                            msg_bytes.clone(),
+                            encryption_method,
+                            msg_bytes,
                             credentials,
                         ).await);
                         println!("Sending group message: {content:?}");
@@ -705,7 +713,7 @@ pub fn DmGroupPanel(
 
 #[component]
 #[allow(non_snake_case)]
-fn DmMessageComponent(message: DmMessage) -> Element {
+fn DmMessageComponent(contact_id: u64, message: DmMessage) -> Element {
     const ICON_MSG_STATUS_SENT: Asset = asset!(
         "/assets/msg_status_sent_icon.png",
         ImageAssetOptions::new()
@@ -724,6 +732,21 @@ fn DmMessageComponent(message: DmMessage) -> Element {
             })
             .with_format(ImageFormat::Avif)
     );
+    let message_content = if message.encryption_method != "plain" {
+        if let Some(key) = STORAGE.load_dm_key(contact_id) {
+            if let Some(Some(plaintext)) = crypto::symmetric_decrypt(&key.0, message.content, &key.1) {
+                let plain_string = String::from_utf8_lossy(&plaintext);
+                rsx!({plain_string})
+            } else {
+                rsx!(p { style: "color:#f00", "Failed to decrypt message" })
+            }
+        } else {
+            rsx!(p { style: "color:#f00", "Failed to decrypt message" })
+        }
+    } else {
+        let plain_string = String::from_utf8_lossy(&message.content);
+        rsx!({plain_string})
+    };
     let sent_by_me = message.status != MessageStatus::SentByOther;
     let time = if let Some(time) = message.sent_time {
         let utc = time.and_local_timezone(Local).unwrap();
@@ -739,7 +762,7 @@ fn DmMessageComponent(message: DmMessage) -> Element {
                 "msg-other"
             })},
 
-            {String::from_utf8_lossy(&message.content)}
+            {message_content}
             div {
                 class: "msg-info",
 
@@ -853,6 +876,7 @@ fn GroupMessageComponent(
     message: GroupMessage,
     self_id: u64,
     credentials: AccountCredentials,
+    group_id: u64,
 ) -> Element {
     let mut author_data = use_signal(|| PacketState::NotStarted);
     let author_id = message.sender_id;
@@ -886,6 +910,19 @@ fn GroupMessageComponent(
     } else {
         "??:??".to_owned()
     };
+    let message_content = if message.encryption_method != "plain" {
+        if let Some(key) = STORAGE.load_group_key(group_id) {
+            if let Some(Some(plaintext)) = crypto::symmetric_decrypt(&key.0, message.content, &key.1) {
+                rsx!({String::from_utf8_lossy(&plaintext)})
+            } else {
+                rsx!(p { style: "color:#f00", "Failed to decrypt message" })
+            }
+        } else {
+            rsx!(p { style: "color:#f00", "Failed to decrypt message" })
+        }
+    } else {
+        rsx!({String::from_utf8_lossy(&message.content)})
+    };
     rsx! {
         {author}
         div {
@@ -895,7 +932,7 @@ fn GroupMessageComponent(
                 "msg-other"
             })},
 
-            {String::from_utf8_lossy(&message.content)}
+            {message_content}
             div {
                 class: "msg-info",
 

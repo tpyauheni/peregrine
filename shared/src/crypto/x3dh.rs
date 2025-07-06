@@ -51,13 +51,13 @@ pub fn generate_receiver_keys(
     ))
 }
 
-#[derive(Clone)]
+#[derive(Clone, Serialize, Deserialize)]
 pub struct X3DhData {
-    ek_pub: PublicKey,
-    opk_id: Option<u32>,
-    ciphertext: Box<[u8]>,
-    mac: Box<[u8]>,
-    signature: Box<[u8]>,
+    pub ek_pub: PublicKey,
+    pub opk_id: Option<u32>,
+    pub ciphertext: Box<[u8]>,
+    pub mac: Box<[u8]>,
+    pub signature: Box<[u8]>,
 }
 
 #[derive(Debug, Clone)]

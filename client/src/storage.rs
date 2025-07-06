@@ -76,9 +76,19 @@ impl Storage {
             load_dm_key,
             remove_dm_key,
         ],
-        format!("dm{dm_group_id}.bin"),
+        format!("dm{other_user_id}.bin"),
         (String, Box<[u8]>),
-        [dm_group_id: u64],
+        [other_user_id: u64],
+    );
+    storage_file!(
+        pub [
+            store_group_key_box,
+            load_group_key,
+            remove_group_key,
+        ],
+        format!("group{group_id}.bin"),
+        (String, Box<[u8]>),
+        [group_id: u64],
     );
 
     pub fn x3dh_data(&self, alg_name: &str) -> (X3DhReceiverKeysPrivate, X3DhReceiverKeysPublic) {
@@ -91,8 +101,12 @@ impl Storage {
         }
     }
 
-    pub fn store_dm_key(&self, dm_group_id: u64, data: (&str, &[u8])) -> bool {
-        self.store_dm_key_box(dm_group_id, (data.0.to_owned(), Box::from(data.1)))
+    pub fn store_dm_key(&self, other_user_id: u64, data: (&str, &[u8])) -> bool {
+        self.store_dm_key_box(other_user_id, (data.0.to_owned(), Box::from(data.1)))
+    }
+
+    pub fn store_group_key(&self, group_id: u64, data: (&str, &[u8])) -> bool {
+        self.store_group_key_box(group_id, (data.0.to_owned(), Box::from(data.1)))
     }
 }
 

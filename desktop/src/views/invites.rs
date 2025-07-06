@@ -1,13 +1,15 @@
 use client::{
     cache::CACHE,
     future_retry_loop,
-    packet_sender::{PacketSender, PacketState},
+    packet_sender::{PacketSender, PacketState}, storage::STORAGE,
 };
 use dioxus::prelude::*;
 use dioxus_free_icons::icons::go_icons::{
     GoAlert, GoCircleSlash, GoLock, GoPeople, GoSync, GoUnlock,
 };
-use server::{AccountCredentials, DmInvite, GroupInvite};
+use postcard::from_bytes;
+use server::{AccountCredentials, DmInvite, GroupInvite, UserAccount};
+use shared::crypto::{self, x3dh::{self, X3DhData}};
 
 #[derive(Clone, Copy)]
 enum Tab {
@@ -174,7 +176,7 @@ fn SentInvite(invite: Invite, credentials: AccountCredentials) -> Element {
         };
     }
     let (invited_id, group_id) = match invite {
-        Invite::Conversation(invite) => (invite.other_id, None),
+        Invite::Conversation(ref invite) => (invite.other_id, None),
         Invite::Group(ref invite) => (invite.invited_id, Some(invite.group_id)),
     };
     use_future(move || async move {
@@ -205,8 +207,8 @@ fn SentInvite(invite: Invite, credentials: AccountCredentials) -> Element {
             account.username,
             account.email,
             match invite {
-                Invite::Conversation(invite) => {
-                    if invite.encrypted {
+                Invite::Conversation(ref invite) => {
+                    if invite.encryption_data.is_some() {
                         icon!(GoLock)
                     } else {
                         icon!(GoUnlock)
@@ -318,6 +320,24 @@ fn SentInvite(invite: Invite, credentials: AccountCredentials) -> Element {
     }
 }
 
+fn get_shared_key(id: u64, encryption_data: Option<Box<[u8]>>, user_data: PacketState<Option<UserAccount>>, for_dm: bool) -> Option<Box<[u8]>> {
+    let PacketState::Response(Some(user)) = user_data else {
+        return None;
+    };
+    let encryption_data = encryption_data?;
+    let x3dh_data: X3DhData = from_bytes(&encryption_data).ok()?;
+    // TODO: Get `crypto_alg` from `encryption_data`.
+    let crypto_alg = crypto::preferred_alogirthm();
+    let (private_keys, public_keys) = STORAGE.x3dh_data(crypto_alg);
+    let shared_key = x3dh::decode_x3dh(x3dh_data, user.cryptoidentity.ik, public_keys, private_keys).ok()?;
+    if for_dm {
+        STORAGE.store_dm_key(id, (crypto_alg, &shared_key));
+    } else {
+        STORAGE.store_group_key(id, (crypto_alg, &shared_key));
+    }
+    Some(shared_key)
+}
+
 #[component]
 #[allow(non_snake_case)]
 fn ReceivedInvite(invite: Invite, credentials: AccountCredentials) -> Element {
@@ -337,6 +357,19 @@ fn ReceivedInvite(invite: Invite, credentials: AccountCredentials) -> Element {
     let mut group_data = use_signal(|| PacketState::NotStarted);
     let status = match (*accept_result.read()).clone() {
         PacketState::Response(Some(group_id)) => {
+            let (valid_shared_key, id) = match invite {
+                Invite::Conversation(invite) => {
+                    let id = invite.initiator_id;
+                    (get_shared_key(id, invite.encryption_data, user_data(), true).is_some(), id)
+                }
+                Invite::Group(invite) => {
+                    let id = invite.group_id;
+                    (get_shared_key(id, invite.encryption_data, user_data(), false).is_some(), id)
+                }
+            };
+            if !valid_shared_key {
+                eprintln!("Failed to decrypt shared key for invite {id}");
+            }
             println!("Created DM group: {group_id}");
             return rsx!();
         }
@@ -371,7 +404,7 @@ fn ReceivedInvite(invite: Invite, credentials: AccountCredentials) -> Element {
         };
     }
     let (inviter_id, group_id) = match invite {
-        Invite::Conversation(invite) => (invite.initiator_id, None),
+        Invite::Conversation(ref invite) => (invite.initiator_id, None),
         Invite::Group(ref invite) => (invite.inviter_id, Some(invite.group_id)),
     };
     use_future(move || async move {
@@ -402,8 +435,8 @@ fn ReceivedInvite(invite: Invite, credentials: AccountCredentials) -> Element {
             account.username,
             account.email,
             match invite {
-                Invite::Conversation(invite) => {
-                    if invite.encrypted {
+                Invite::Conversation(ref invite) => {
+                    if invite.encryption_data.is_some() {
                         icon!(GoLock)
                     } else {
                         icon!(GoUnlock)

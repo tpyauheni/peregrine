@@ -13,6 +13,7 @@ shared = { workspace = true }
 chrono = { workspace = true }
 tokio = { version = "1.45", features = ["time"] }
 dioxus-free-icons = { version = "0.9", features = ["octicons"] }
+postcard = { workspace = true }
 
 [features]
 default = []

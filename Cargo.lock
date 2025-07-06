@@ -1021,6 +1021,7 @@ dependencies = [
  "client",
  "dioxus",
  "dioxus-free-icons",
+ "postcard",
  "server",
  "shared",
  "tokio",
