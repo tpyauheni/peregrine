@@ -471,15 +471,16 @@ impl Database {
         )?)
     }
 
-    pub fn has_user_pubkey(&self, account_id: u64, public_key: &[u8]) -> DbResult<bool> {
+    pub fn find_user_with_pubkey(&self, account_name: String, public_key: &[u8]) -> DbResult<Option<u64>> {
         let mut conn = self.pool.get_conn()?;
-        let account: Option<u8> = conn.exec_first(
-            r"SELECT 1 FROM `accounts`
-            WHERE `id` = ?
+        let account: Option<u64> = conn.exec_first(
+            r"SELECT `id` FROM `accounts`
+            WHERE (`username` = ?
+                OR `email` = ?)
                 AND `public_key` = ?;",
-            (account_id, public_key),
+            (account_name.clone(), account_name, public_key),
         )?;
-        Ok(account.is_some())
+        Ok(account)
     }
 
     pub fn get_user_by_id(&self, account_id: u64) -> DbResult<Option<Account>> {

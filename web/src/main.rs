@@ -34,7 +34,7 @@ fn main() {
     }
     #[cfg(not(feature = "server"))]
     {
-        server_fn::client::set_server_url("http://5.100.193.94:8000");
+        server_fn::client::set_server_url("https://peregrine.werryxgames.com:8000");
     }
     dioxus::launch(App);
 }

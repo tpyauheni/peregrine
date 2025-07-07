@@ -60,7 +60,7 @@ fn main() {
 
     #[cfg(all(not(feature = "server"), not(debug_assertions)))]
     {
-        server_fn::client::set_server_url("http://5.100.193.94:8000");
+        server_fn::client::set_server_url("https://peregrine.werryxgames.com:8000");
     }
     #[cfg(all(feature = "desktop", not(debug_assertions)))]
     {

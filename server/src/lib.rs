@@ -321,15 +321,15 @@ pub async fn create_account(
 
 #[server(endpoint = "login_account")]
 pub async fn login_account(
-    id: u64,
+    username: String,
     login_algorithm: String,
     public_key: Box<[u8]>,
     session_params: SessionParams,
     signature: Box<[u8]>,
-) -> Result<[u8; 32], ServerFnError<ServerError>> {
-    if session_params.authorize_before_seconds >= LIMITS.max_session_before_period
-        || session_params.authorize_after_seconds >= LIMITS.max_session_after_period
-        || session_params.session_validity_seconds >= LIMITS.max_session_validity_period
+) -> Result<(u64, [u8; 32]), ServerFnError<ServerError>> {
+    if session_params.authorize_before_seconds > LIMITS.max_session_before_period
+        || session_params.authorize_after_seconds > LIMITS.max_session_after_period
+        || session_params.session_validity_seconds > LIMITS.max_session_validity_period
     {
         return Err(ServerFnError::WrappedServerError(
             ServerError::LimitExceeded,
@@ -389,9 +389,11 @@ pub async fn login_account(
         ));
     }
 
-    match DB.has_user_pubkey(id, &public_key) {
+    let id = match DB.find_user_with_pubkey(username, &public_key) {
         Ok(result) => {
-            if !result {
+            if let Some(result) = result {
+                result
+            } else {
                 return Err(ServerFnError::WrappedServerError(
                     ServerError::AccountNotFound,
                 ));
@@ -403,7 +405,7 @@ pub async fn login_account(
                 ServerError::InternalDatabaseError,
             ));
         }
-    }
+    };
 
     match DB.create_session(
         id,
@@ -412,7 +414,7 @@ pub async fn login_account(
     ) {
         Ok(session_id) => {
             debug!("New session created: {session_id:?}");
-            Ok(session_id)
+            Ok((id, session_id))
         }
         Err(err) => {
             error!("Failed to create login session: {err:?}");
