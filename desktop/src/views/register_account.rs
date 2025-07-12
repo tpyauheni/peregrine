@@ -1,6 +1,5 @@
 use client::storage::STORAGE;
 use dioxus::{logger::tracing::{error, info}, prelude::*};
-use postcard::to_allocvec;
 use server::{AccountCredentials, SessionParams};
 use shared::{crypto::{self, AsymmetricCipherPrivate, AsymmetricCipherPublic}, limits::LIMITS};
 

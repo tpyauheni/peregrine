@@ -10,7 +10,7 @@ members = [
 ]
 
 [workspace.dependencies]
-dioxus = "0.6"
+dioxus = { version = "0.6", default-features = false }
 serde = "1.0"
 base64 = "0.22"
 chrono = "0.4"

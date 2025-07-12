@@ -148,6 +148,21 @@ impl Database {
             );
         ",
         )?;
+        conn.query_drop(
+            r"
+            ALTER TABLE `sessions`
+                ADD INDEX `session_token_idx` (`session_token`(32));
+            ALTER TABLE `sessions`
+                ADD INDEX `account_id_idx` (`account_id`);
+
+            ALTER TABLE `group_members`
+                ADD INDEX `user_groups_idx` (`user_id`, `group_id`),
+                ADD INDEX `group_users_idx` (`group_id`, `user_id`);
+
+            ALTER TABLE `group_messages`
+                ADD INDEX `group_time_idx` (`group_id`, `send_time`);
+        ",
+        )?;
         Ok(())
     }
 
@@ -208,12 +223,11 @@ impl Database {
 
     pub fn find_user(&self, query: &str, ignore_user: u64) -> DbResult<Vec<Account>> {
         let mut conn = self.pool.get_conn()?;
-        let query = format!("%{query}%");
         let mut accounts = vec![];
         conn.exec_map(
             r"SELECT * FROM `accounts`
-                WHERE (`username` LIKE :query
-                    OR `email` LIKE :query)
+                WHERE (`username` LIKE CONCAT('%', :query, '%')
+                    OR `email` LIKE CONCAT('%', :query, '%'))
                     AND `id` != :ignore_user
                 LIMIT 10;",
             params! {
@@ -650,7 +664,7 @@ impl Database {
             `group_id`,
             `permissions`,
             `encryption_data`
-        ) VALUES (?, ?, ?, ?);",
+        ) VALUES (?, ?, ?, ?, ?);",
             (
                 inviter_id,
                 invited_id,

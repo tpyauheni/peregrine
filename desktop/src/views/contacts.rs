@@ -732,16 +732,18 @@ fn DmMessageComponent(contact_id: u64, message: DmMessage) -> Element {
     );
     let message_content = if message.encryption_method != "plain" {
         if let Some(key) = STORAGE.load_dm_key(contact_id) {
-            if let Some(Some(plaintext)) =
-                crypto::symmetric_decrypt(&key.0, message.content, &key.1)
-            {
-                let plain_string = String::from_utf8_lossy(&plaintext);
-                rsx!({ plain_string })
-            } else {
-                rsx!(p { style: "color:#f00", "Failed to decrypt message" })
+            match crypto::symmetric_decrypt(&key.0, &message.content, &key.1) {
+                Some(Some(plaintext)) => {
+                    let plain_string = String::from_utf8_lossy(&plaintext);
+                    rsx!({ plain_string })
+                },
+                status => {
+                    println!("Decryption failed: {status:?}");
+                    rsx!(p { style: "color:#faa", "Failed to decrypt message" })
+                }
             }
         } else {
-            rsx!(p { style: "color:#f00", "Failed to decrypt message" })
+            rsx!(p { style: "color:#faa", "Failed to decrypt message" })
         }
     } else {
         let plain_string = String::from_utf8_lossy(&message.content);
@@ -913,7 +915,7 @@ fn GroupMessageComponent(
     let message_content = if message.encryption_method != "plain" {
         if let Some(key) = STORAGE.load_group_key(group_id) {
             if let Some(Some(plaintext)) =
-                crypto::symmetric_decrypt(&key.0, message.content, &key.1)
+                crypto::symmetric_decrypt(&key.0, &message.content, &key.1)
             {
                 rsx!({ String::from_utf8_lossy(&plaintext) })
             } else {

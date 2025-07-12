@@ -243,7 +243,7 @@ pub fn symmetric_encrypt(alg_name: &str, plaintext: &[u8], key: &[u8]) -> Option
 
 pub fn symmetric_decrypt(
     alg_name: &str,
-    ciphertext: Box<[u8]>,
+    ciphertext: &[u8],
     key: &[u8],
 ) -> Option<Option<Box<[u8]>>> {
     match alg_name {

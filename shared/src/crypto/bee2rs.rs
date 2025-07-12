@@ -291,40 +291,51 @@ pub(super) fn aead_unwrap(
 
 pub(super) fn symmetric_encrypt(plaintext: &[u8], key: &[u8]) -> Box<[u8]> {
     let iv = get_iv();
-    if key.len() == 32 {
+    let iv = iv[..16].try_into().unwrap();
+    let mut result = Vec::from(iv);
+    result.extend(if key.len() == 32 {
         let key = BeltKey256::new(key.try_into().unwrap());
-        let mut ctr = key.ctr(iv[..16].try_into().unwrap());
+        let mut ctr = key.ctr(iv);
         ctr.encrypt(plaintext)
     } else if key.len() == 24 {
         let key = BeltKey192::new(key.try_into().unwrap());
-        let mut ctr = key.ctr(iv[..16].try_into().unwrap());
+        let mut ctr = key.ctr(iv);
         ctr.encrypt(plaintext)
     } else if key.len() == 16 {
         let key = BeltKey128::new(key.try_into().unwrap());
-        let mut ctr = key.ctr(iv[..16].try_into().unwrap());
+        let mut ctr = key.ctr(iv);
         ctr.encrypt(plaintext)
     } else {
         panic!();
-    }
+    });
+    result.into_boxed_slice()
 }
 
-pub(super) fn symmetric_decrypt(ciphertext: Box<[u8]>, key: &[u8]) -> Option<Box<[u8]>> {
-    let iv = get_iv();
-    if key.len() == 32 {
+pub(super) fn symmetric_decrypt(ciphertext: &[u8], key: &[u8]) -> Option<Box<[u8]>> {
+    let Ok(iv) = ciphertext[..16].try_into() else {
+        return None;
+    };
+    let value = if key.len() == 32 {
         let key = BeltKey256::new(key.try_into().unwrap());
-        let mut ctr = key.ctr(iv[..16].try_into().unwrap());
-        ctr.decrypt(ciphertext).ok()
+        let mut ctr = key.ctr(iv);
+        ctr.decrypt(ciphertext[16..].iter().cloned().collect())
     } else if key.len() == 24 {
         let key = BeltKey192::new(key.try_into().unwrap());
-        let mut ctr = key.ctr(iv[..16].try_into().unwrap());
-        ctr.decrypt(ciphertext).ok()
+        let mut ctr = key.ctr(iv);
+        ctr.decrypt(ciphertext[16..].iter().cloned().collect())
     } else if key.len() == 16 {
         let key = BeltKey128::new(key.try_into().unwrap());
-        let mut ctr = key.ctr(iv[..16].try_into().unwrap());
-        ctr.decrypt(ciphertext).ok()
+        let mut ctr = key.ctr(iv);
+        ctr.decrypt(ciphertext[16..].iter().cloned().collect())
     } else {
         panic!();
+    };
+
+    if let Err(ref err) = value {
+        println!("Failed to decrypt: {err:?}");
     }
+
+    value.ok()
 }
 
 pub fn symmetric_genkey(strength: KeyStrength) -> Box<[u8]> {

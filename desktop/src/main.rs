@@ -58,10 +58,10 @@ fn main() {
         server::init_server();
     }
 
-    #[cfg(all(not(feature = "server"), not(debug_assertions)))]
-    {
-        server_fn::client::set_server_url("https://peregrine.werryxgames.com:8000");
-    }
+    // #[cfg(all(not(feature = "server"), not(debug_assertions)))]
+    // {
+    //     server_fn::client::set_server_url("https://peregrine.werryxgames.com:8000");
+    // }
     #[cfg(all(feature = "desktop", not(debug_assertions)))]
     {
         use dioxus::desktop::Config;
