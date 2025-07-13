@@ -17,7 +17,7 @@ use shared::crypto::PublicKey;
 use shared::limits::LIMITS;
 #[cfg(feature = "server")]
 use shared::types::GroupPermissions;
-use shared::{crypto::x3dh::X3DhReceiverKeysPublic, types::UserIcon};
+use shared::{crypto::{x3dh::X3DhReceiverKeysPublic, CryptoAlgorithms}, types::UserIcon};
 
 #[cfg(feature = "server")]
 use crate::secret::db::DB;
@@ -371,7 +371,7 @@ pub async fn login_account(
     let data = &session_params.to_boxed_slice();
 
     let Some(result) = shared::crypto::verify(
-        &login_algorithm,
+        &CryptoAlgorithms::from_string(login_algorithm),
         PublicKey {
             pk: public_key.clone(),
         },

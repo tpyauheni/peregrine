@@ -1,7 +1,7 @@
 use client::storage::STORAGE;
 use dioxus::{logger::tracing::{error, info}, prelude::*};
 use server::{AccountCredentials, SessionParams};
-use shared::{crypto::{self, AsymmetricCipherPrivate, AsymmetricCipherPublic}, limits::LIMITS};
+use shared::{crypto, limits::LIMITS};
 
 use crate::Route;
 
@@ -166,6 +166,7 @@ pub fn RegisterAccount() -> Element {
             return;
         }
 
+        // FIXME:
         let cryptoset = shared::crypto::default_cryptoset(password.as_bytes(), None);
         let public_key = cryptoset.asymmetric_cipher.into_public_key_bytes();
         info!(

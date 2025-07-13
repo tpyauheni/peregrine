@@ -6,7 +6,7 @@ use super::*;
 
 #[derive(Debug, Clone, Serialize, Deserialize, PartialEq, Eq)]
 pub struct X3DhReceiverKeysPublic {
-    pub alg_name: String,
+    pub algorithms: CryptoAlgorithms,
     pub ik: PublicKey,
     pub spk: PublicKey,
     pub spk_signature: Box<[u8]>,
@@ -21,16 +21,16 @@ pub struct X3DhReceiverKeysPrivate {
 }
 
 pub fn generate_receiver_keys(
-    alg_name: &str,
+    algorithms: &CryptoAlgorithms,
 ) -> Option<(X3DhReceiverKeysPrivate, X3DhReceiverKeysPublic)> {
-    let (ik_priv, ik_pub) = generate_keypair(alg_name)?;
-    let (spk_priv, spk_pub) = generate_keypair(alg_name)?;
-    let spk_signature = sign(alg_name, ik_priv.clone(), ik_pub.clone(), &spk_pub.pk)?;
+    let (ik_priv, ik_pub) = generate_keypair(algorithms)?;
+    let (spk_priv, spk_pub) = generate_keypair(algorithms)?;
+    let spk_signature = sign(algorithms, ik_priv.clone(), ik_pub.clone(), &spk_pub.pk)?;
 
     let mut opks_priv = Vec::new();
     let mut opks_pub = Vec::new();
     for _ in 0..10 {
-        let (opk_priv, opk_pub) = generate_keypair(alg_name)?;
+        let (opk_priv, opk_pub) = generate_keypair(algorithms)?;
         opks_priv.push(opk_priv);
         opks_pub.push(opk_pub);
     }
@@ -42,7 +42,7 @@ pub fn generate_receiver_keys(
             opks: opks_priv,
         },
         X3DhReceiverKeysPublic {
-            alg_name: alg_name.to_owned(),
+            algorithms: algorithms.clone(),
             ik: ik_pub,
             spk: spk_pub,
             opks: opks_pub,
@@ -87,10 +87,10 @@ pub fn encode_x3dh(
     ik_pub: PublicKey,
     other_keys: X3DhReceiverKeysPublic,
 ) -> Result<X3DhData, X3DhError> {
-    let alg_name = &other_keys.alg_name;
+    let algorithms= &other_keys.algorithms;
 
     match verify(
-        alg_name,
+        algorithms,
         other_keys.ik.clone(),
         &other_keys.spk.pk,
         &other_keys.spk_signature,
@@ -100,25 +100,25 @@ pub fn encode_x3dh(
         None => return Err(X3DhError::AlgorithmNotSupported),
     }
 
-    let Some((ek_priv, ek_pub)) = generate_keypair(alg_name) else {
+    let Some((ek_priv, ek_pub)) = generate_keypair(algorithms) else {
         return Err(X3DhError::AlgorithmNotSupported);
     };
 
     let dh1 = diffie_hellman(
-        alg_name,
+        algorithms,
         ik_priv.clone(),
         ik_pub.clone(),
         other_keys.spk.clone(),
     )
     .unwrap();
     let dh2 = diffie_hellman(
-        alg_name,
+        algorithms,
         ek_priv.clone(),
         ek_pub.clone(),
         other_keys.ik.clone(),
     )
     .unwrap();
-    let dh3 = diffie_hellman(alg_name, ek_priv, ek_pub.clone(), other_keys.spk).unwrap();
+    let dh3 = diffie_hellman(algorithms, ek_priv, ek_pub.clone(), other_keys.spk).unwrap();
     let mut combined_dh = vec![];
     combined_dh.extend(dh1);
     combined_dh.extend(dh2);
@@ -128,7 +128,7 @@ pub fn encode_x3dh(
         None
     } else {
         let mut buffer = [0u8; 4];
-        default_rng().next_buffer(&mut buffer);
+        rng_fill(algorithms, &mut buffer);
         Some(u32::from_ne_bytes(buffer) % other_keys.opks.len() as u32)
     };
     let opk = if let Some(opk_id) = opk_id {
@@ -141,15 +141,15 @@ pub fn encode_x3dh(
         combined_dh.extend(opk.pk.clone());
     }
 
-    let sk = kdf(alg_name, &combined_dh, 32).unwrap();
-    let sk2 = kdf(alg_name, &sk, 32).unwrap();
+    let sk = kdf(algorithms, &combined_dh, 32).unwrap();
+    let sk2 = kdf(algorithms, &sk, 32).unwrap();
     let sk2 = PrivateKey { sk: sk2 };
 
     let mut ad = vec![];
     ad.extend(ik_pub.pk.clone());
     ad.extend(other_keys.ik.pk);
 
-    let (ciphertext, mac) = aead_wrap(alg_name, data, sk2, &ad).unwrap();
+    let (ciphertext, mac) = aead_wrap(algorithms, data, sk2, &ad).unwrap();
 
     let mut signed_data = vec![];
     signed_data.extend(ek_pub.pk.clone());
@@ -159,7 +159,7 @@ pub fn encode_x3dh(
     signed_data.extend(ciphertext.clone());
     // TODO: Idk with which key to sign as it's not specified by documentation provided. So I
     // assume it's `ik_priv`.
-    let signature = sign(alg_name, ik_priv, ik_pub, &signed_data).unwrap();
+    let signature = sign(algorithms, ik_priv, ik_pub, &signed_data).unwrap();
 
     Ok(X3DhData {
         ek_pub,
@@ -176,7 +176,7 @@ pub fn decode_x3dh(
     self_keys_public: X3DhReceiverKeysPublic,
     self_keys_private: X3DhReceiverKeysPrivate,
 ) -> Result<Box<[u8]>, X3DhError> {
-    let alg_name = &self_keys_public.alg_name;
+    let algorithms= &self_keys_public.algorithms;
 
     let mut signed_data = vec![];
     signed_data.extend(data.ek_pub.pk.clone());
@@ -191,7 +191,7 @@ pub fn decode_x3dh(
     signed_data.extend(data.ciphertext.clone());
 
     match verify(
-        alg_name,
+        algorithms,
         other_ik_pub.clone(),
         &signed_data,
         &data.signature,
@@ -202,21 +202,21 @@ pub fn decode_x3dh(
     }
 
     let dh1 = diffie_hellman(
-        alg_name,
+        algorithms,
         self_keys_private.spk.clone(),
         self_keys_public.spk.clone(),
         other_ik_pub.clone(),
     )
     .unwrap();
     let dh2 = diffie_hellman(
-        alg_name,
+        algorithms,
         self_keys_private.ik,
         self_keys_public.ik.clone(),
         data.ek_pub.clone(),
     )
     .unwrap();
     let dh3 = diffie_hellman(
-        alg_name,
+        algorithms,
         self_keys_private.spk,
         self_keys_public.spk,
         data.ek_pub,
@@ -231,15 +231,15 @@ pub fn decode_x3dh(
         combined_dh.extend(opk.pk.clone());
     }
 
-    let sk = kdf(alg_name, &combined_dh, 32).unwrap();
-    let sk2 = kdf(alg_name, &sk, 32).unwrap();
+    let sk = kdf(algorithms, &combined_dh, 32).unwrap();
+    let sk2 = kdf(algorithms, &sk, 32).unwrap();
     let sk2 = PrivateKey { sk: sk2 };
 
     let mut ad = vec![];
     ad.extend(other_ik_pub.pk);
     ad.extend(self_keys_public.ik.pk);
 
-    match aead_unwrap(alg_name, &data.ciphertext, &ad, &data.mac, sk2) {
+    match aead_unwrap(algorithms, &data.ciphertext, &ad, &data.mac, sk2) {
         Some(Some(plaintext)) => Ok(plaintext),
         Some(None) => Err(X3DhError::DecryptionFailure),
         None => Err(X3DhError::AlgorithmNotSupported),
@@ -248,12 +248,12 @@ pub fn decode_x3dh(
 
 #[cfg(test)]
 mod tests {
-    use crate::crypto::x3dh::{decode_x3dh, encode_x3dh, generate_receiver_keys};
+    use crate::crypto::{x3dh::{decode_x3dh, encode_x3dh, generate_receiver_keys}, CryptoAlgorithms};
 
     #[test]
     fn test_x3dh() {
-        let random_keys_a = generate_receiver_keys("bycrypto").unwrap();
-        let random_keys_b = generate_receiver_keys("bycrypto").unwrap();
+        let random_keys_a = generate_receiver_keys(&CryptoAlgorithms::prequantum_bee2rs()).unwrap();
+        let random_keys_b = generate_receiver_keys(&CryptoAlgorithms::prequantum_bee2rs()).unwrap();
         let message = "Hello, World!".as_bytes();
         let encode_data = encode_x3dh(
             message,

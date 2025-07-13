@@ -969,7 +969,7 @@ mod tests {
     use crate::{DmInvite, MessageStatus, secret::db::Account};
 
     use super::Database;
-    use shared::crypto::x3dh::{self, X3DhReceiverKeysPublic};
+    use shared::crypto::{x3dh::{self, X3DhReceiverKeysPublic}, preferred_alogirthm};
 
     static DB: LazyLock<Database> =
         LazyLock::new(|| Database::new(&std::env::var("TEST_DB_URL").unwrap()));
@@ -998,7 +998,7 @@ mod tests {
         if let Some(cryptoidentity) = CRYPTOIDENTITIES.lock().unwrap().get(&user_id) {
             cryptoidentity.clone()
         } else {
-            let (_, cryptoidentity) = x3dh::generate_receiver_keys("bycrypto").unwrap();
+            let (_, cryptoidentity) = x3dh::generate_receiver_keys(&preferred_alogirthm()).unwrap();
             CRYPTOIDENTITIES
                 .lock()
                 .unwrap()

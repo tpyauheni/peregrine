@@ -4,7 +4,7 @@ use platform_dirs::AppDirs;
 use server::AccountCredentials;
 
 use shared::{
-    crypto::x3dh::{self, X3DhReceiverKeysPrivate, X3DhReceiverKeysPublic},
+    crypto::{x3dh::{self, X3DhReceiverKeysPrivate, X3DhReceiverKeysPublic}, CryptoAlgorithms},
     storage::{GeneralStorage, RawStorage},
 };
 
@@ -69,9 +69,9 @@ impl Storage {
             load_x3dh_data,
             remove_x3dh_data,
         ],
-        format!("cryptoidentity_{alg_name}.bin"),
+        format!("cryptoidentity_{algorithms}.bin"),
         (X3DhReceiverKeysPrivate, X3DhReceiverKeysPublic),
-        [alg_name: &str],
+        [algorithms: &CryptoAlgorithms],
     );
     storage_file!(
         pub [
@@ -80,7 +80,7 @@ impl Storage {
             remove_dm_key,
         ],
         format!("dm{other_user_id}.bin"),
-        (String, Box<[u8]>),
+        (CryptoAlgorithms, Box<[u8]>),
         [other_user_id: u64],
     );
     storage_file!(
@@ -90,26 +90,26 @@ impl Storage {
             remove_group_key,
         ],
         format!("group{group_id}.bin"),
-        (String, Box<[u8]>),
+        (CryptoAlgorithms, Box<[u8]>),
         [group_id: u64],
     );
 
-    pub fn x3dh_data(&self, alg_name: &str) -> (X3DhReceiverKeysPrivate, X3DhReceiverKeysPublic) {
-        if let Some(data) = self.load_x3dh_data(alg_name) {
+    pub fn x3dh_data(&self, algorithms: &CryptoAlgorithms) -> (X3DhReceiverKeysPrivate, X3DhReceiverKeysPublic) {
+        if let Some(data) = self.load_x3dh_data(algorithms) {
             data
         } else {
-            let data = x3dh::generate_receiver_keys(alg_name).unwrap();
-            self.store_x3dh_data(alg_name, data.clone());
+            let data = x3dh::generate_receiver_keys(algorithms).unwrap();
+            self.store_x3dh_data(algorithms, data.clone());
             data
         }
     }
 
-    pub fn store_dm_key(&self, other_user_id: u64, data: (&str, &[u8])) -> bool {
-        self.store_dm_key_box(other_user_id, (data.0.to_owned(), Box::from(data.1)))
+    pub fn store_dm_key(&self, other_user_id: u64, data: (CryptoAlgorithms, &[u8])) -> bool {
+        self.store_dm_key_box(other_user_id, (data.0, Box::from(data.1)))
     }
 
-    pub fn store_group_key(&self, group_id: u64, data: (&str, &[u8])) -> bool {
-        self.store_group_key_box(group_id, (data.0.to_owned(), Box::from(data.1)))
+    pub fn store_group_key(&self, group_id: u64, data: (CryptoAlgorithms, &[u8])) -> bool {
+        self.store_group_key_box(group_id, (data.0, Box::from(data.1)))
     }
 }
 
