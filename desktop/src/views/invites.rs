@@ -337,7 +337,7 @@ fn get_shared_key(
     let x3dh_data: X3DhData = from_bytes(&encryption_data).ok()?;
     // TODO: Get `crypto_alg` from `encryption_data`.
     let crypto_alg = crypto::preferred_alogirthm();
-    let (private_keys, public_keys) = STORAGE.x3dh_data(crypto_alg);
+    let (private_keys, public_keys) = STORAGE.x3dh_data(&crypto_alg);
     let shared_key =
         x3dh::decode_x3dh(x3dh_data, user.cryptoidentity.ik, public_keys, private_keys).ok()?;
     if for_dm {

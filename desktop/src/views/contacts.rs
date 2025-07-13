@@ -413,7 +413,7 @@ fn DmMessagesPanel(selected_dm_group: DmGroup, credentials: AccountCredentials) 
                         let (msg_bytes, encryption_method): (Box<[u8]>, String) = if let Some((algorithm_name, key)) = STORAGE.load_dm_key(selected_dm_group.id) {
                             (
                                 crypto::symmetric_encrypt(&algorithm_name, content.as_bytes(), &key).unwrap(),
-                                crypto::to_encryption_method(&algorithm_name),
+                                algorithm_name.encryption_method(),
                             )
                         } else {
                             (Box::from(content.clone().as_bytes()), "plain".to_owned())
@@ -603,7 +603,7 @@ fn GroupMessagesPanel(selected_group: MultiUserGroup, credentials: AccountCreden
                         let (msg_bytes, encryption_method): (Box<[u8]>, String) = if let Some((algorithm_name, key)) = STORAGE.load_group_key(selected_group.id) {
                             (
                                 crypto::symmetric_encrypt(&algorithm_name, content.as_bytes(), &key).unwrap(),
-                                crypto::to_encryption_method(&algorithm_name),
+                                algorithm_name.encryption_method(),
                             )
                         } else {
                             (Box::from(content.clone().as_bytes()), "plain".to_owned())

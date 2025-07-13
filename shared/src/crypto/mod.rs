@@ -1,121 +1,19 @@
 #[cfg(feature = "bee2-rs")]
 pub mod bee2rs;
+#[cfg(feature = "aes-gcm")]
+pub mod aes_gcm;
 pub mod x3dh;
 
-use std::fmt::Debug;
+use std::{fmt::{Debug, Display}, str::FromStr};
 
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
-
-pub trait SymmetricCipher<Rng: RandomNumberGenerator>: Debug + Clone {
-    fn encrypt(&mut self, data: &[u8], rng: &mut Rng) -> Box<[u8]>;
-    fn decrypt(&mut self, data: &[u8]) -> Option<Box<[u8]>>;
-
-    fn into_key_bytes(self) -> Box<[u8]>;
-}
-
-pub trait AsymmetricCipherPrivate<Rng: RandomNumberGenerator>: Debug + Clone {
-    fn sign(&mut self, data: &[u8], rng: &mut Rng) -> Box<[u8]>;
-
-    fn into_private_key_bytes(self) -> Box<[u8]>;
-}
-
-pub trait AsymmetricCipherPublic: Debug + Clone {
-    fn verify(&mut self, data: &[u8], signature: &[u8]) -> bool;
-
-    fn into_public_key_bytes(self) -> Box<[u8]>;
-}
-
-pub trait AsymmetricCipher<Rng: RandomNumberGenerator, CipherSym: SymmetricCipher<Rng>>:
-    AsymmetricCipherPrivate<Rng> + AsymmetricCipherPublic
-{
-    fn diffie_hellman(&mut self, other_pubkey: &[u8]) -> CipherSym;
-}
-
-pub trait KeyDerivationAlgorithm<
-    Rng: RandomNumberGenerator,
-    CipherSym: SymmetricCipher<Rng>,
-    CipherAsym: AsymmetricCipher<Rng, CipherSym>,
->
-{
-    fn as_symmetric_key(&mut self, password: &[u8]) -> CipherSym;
-    fn as_asymmetric_key(&mut self, password: &[u8]) -> CipherAsym;
-}
-
-pub trait HashAlgorithm {
-    fn hash(data: &[u8]) -> Box<[u8]>;
-
-    fn update(&mut self, data: &[u8]);
-    fn compute_hash(&mut self) -> Box<[u8]>;
-}
-
-pub trait RandomNumberGenerator {
-    fn next_buffer(&mut self, buffer: &mut [u8]);
-}
-
-pub struct CryptographyAlgorithmSet<
-    Rng: RandomNumberGenerator,
-    CipherSym: SymmetricCipher<Rng>,
-    CipherAsym: AsymmetricCipher<Rng, CipherSym>,
-    Kdf: KeyDerivationAlgorithm<Rng, CipherSym, CipherAsym>,
-    Hash: HashAlgorithm,
-> {
-    pub symmetric_cipher: CipherSym,
-    pub asymmetric_cipher: CipherAsym,
-    pub kdf: Kdf,
-    pub hash: Hash,
-    pub rng: Rng,
-}
-
-impl<
-    Rng: RandomNumberGenerator,
-    CipherSym: SymmetricCipher<Rng>,
-    CipherAsym: AsymmetricCipher<Rng, CipherSym>,
-    Kdf: KeyDerivationAlgorithm<Rng, CipherSym, CipherAsym>,
-    Hash: HashAlgorithm,
-> CryptographyAlgorithmSet<Rng, CipherSym, CipherAsym, Kdf, Hash>
-{
-    pub fn new(mut kdf: Kdf, hash: Hash, rng: Rng, password: &[u8]) -> Self {
-        Self {
-            symmetric_cipher: kdf.as_symmetric_key(password),
-            asymmetric_cipher: kdf.as_asymmetric_key(password),
-            kdf,
-            hash,
-            rng,
-        }
-    }
-}
 
 fn get_iv() -> [u8; 32] {
     let mut iv_buffer: [u8; 32] = [0; 32];
     let mut rng = rand::rng();
     rng.fill_bytes(&mut iv_buffer);
     iv_buffer
-}
-
-#[cfg(feature = "bee2-rs")]
-pub type Bee2RsCryptoset = bee2rs::CryptoSet;
-#[cfg(not(feature = "bee2-rs"))]
-pub type Bee2RsCryptoset = ();
-
-pub fn bee2rs_cryptoset(password: &[u8], iv: Option<[u8; 32]>) -> Option<Bee2RsCryptoset> {
-    if cfg!(feature = "bee2-rs") {
-        Some(bee2rs::cryptoset(password, iv.unwrap_or_else(get_iv)))
-    } else {
-        None
-    }
-}
-
-#[cfg(feature = "bee2-rs")]
-pub fn default_cryptoset(password: &[u8], iv: Option<[u8; 32]>) -> bee2rs::CryptoSet {
-    bee2rs::cryptoset(password, iv.unwrap_or_else(get_iv))
-}
-#[cfg(not(feature = "bee2-rs"))]
-compile_error!("No cryptography algorithm sets configured");
-
-#[cfg(feature = "bee2-rs")]
-pub fn default_rng() -> bee2rs::DefaultRng {
-    bee2rs::rng()
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
@@ -128,66 +26,147 @@ pub struct PrivateKey {
     pub sk: Box<[u8]>,
 }
 
-pub fn hash(alg_name: &str, data: &[u8]) -> Option<Box<[u8]>> {
-    match alg_name {
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct CryptoAlgorithms {
+    hash: String,
+    kdf: String,
+    diffie_hellman: String,
+    signature: String,
+    symmetric_encryption: String,
+    aead: String,
+    rng: String,
+}
+
+impl FromStr for CryptoAlgorithms {
+    type Err = ();
+
+    fn from_str(s: &str) -> Result<Self, Self::Err> {
+        Ok(Self::from_string(s.to_owned()))
+    }
+}
+
+impl Display for CryptoAlgorithms {
+    fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        let mut result = String::new();
+        result += &self.hash;
+        result.push('.');
+        result += &self.kdf;
+        result.push('.');
+        result += &self.diffie_hellman;
+        result.push('.');
+        result += &self.signature;
+        result.push('.');
+        result += &self.symmetric_encryption;
+        result.push('.');
+        result += &self.aead;
+        result.push('.');
+        result += &self.rng;
+        f.write_str(&result)
+    }
+}
+
+impl CryptoAlgorithms {
+    pub fn from_string(alg_name: String) -> Self {
+        Self {
+            hash: alg_name.clone(),
+            kdf: alg_name.clone(),
+            diffie_hellman: alg_name.clone(),
+            signature: alg_name.clone(),
+            symmetric_encryption: alg_name.clone(),
+            aead: alg_name.clone(),
+            rng: alg_name,
+        }
+    }
+
+    #[cfg(feature = "bee2-rs")]
+    pub fn prequantum_bee2rs() -> Self {
+        Self {
+            hash: "bee2-rs::bash512".to_owned(),
+            kdf: "bee2-rs::pbkdf2".to_owned(),
+            diffie_hellman: "bee2-rs::bignb3".to_owned(),
+            signature: "bee2-rs::bignb3".to_owned(),
+            symmetric_encryption: "bee2-rs::belt-ctr".to_owned(),
+            aead: "bee2-rs::belt256-dwp".to_owned(),
+            rng: "bee2-rs::belt-ctr".to_owned(),
+        }
+    }
+
+    #[cfg(all(feature = "aes-gcm", feature = "curve25519-dalek", feature = "pbkdf2"))]
+    pub fn prequantum_standard() -> Self {
+        Self {
+            hash: "rustcrypto::aes-gcm".to_owned(),
+            kdf: "rustcrypto::pbkdf2".to_owned(),
+            diffie_hellman: "dalek::x25519".to_owned(),
+            signature: "dalek::ed25519".to_owned(),
+            symmetric_encryption: "rustcrypto::aes-gcm".to_owned(),
+            aead: "rustcrypto::aes-gcm".to_owned(),
+            rng: "default".to_owned(),
+        }
+    }
+
+    pub fn encryption_method(&self) -> String {
+        self.symmetric_encryption
+            .split_once("::")
+            .map_or_else(
+                || self.symmetric_encryption.clone(),
+                |(_, value)| value.to_owned(),
+            )
+    }
+}
+
+pub fn hash(algorithms: &CryptoAlgorithms, data: &[u8]) -> Option<Box<[u8]>> {
+    match &algorithms.hash as &str {
         #[cfg(feature = "bee2-rs")]
-        "bycrypto" => Some(bee2rs::hash(data)),
+        "bee2-rs::bash512" => Some(bee2rs::hash(data)),
         _ => None,
     }
 }
 
-pub fn cryptosets() -> Vec<String> {
-    vec![
+pub fn generate_keypair(algorithms: &CryptoAlgorithms) -> Option<(PrivateKey, PublicKey)> {
+    match &algorithms.rng as &str {
         #[cfg(feature = "bee2-rs")]
-        "bycrypto".to_owned(),
-    ]
-}
-
-pub fn generate_keypair(alg_name: &str) -> Option<(PrivateKey, PublicKey)> {
-    match alg_name {
-        #[cfg(feature = "bee2-rs")]
-        "bycrypto" => Some(bee2rs::generate_keypair()),
+        "bee2-rs::bignb3" => Some(bee2rs::generate_keypair(&algorithms.signature)),
         _ => None,
     }
 }
 
 pub fn sign(
-    alg_name: &str,
+    algorithms: &CryptoAlgorithms,
     private_key: PrivateKey,
     public_key: PublicKey,
     data: &[u8],
 ) -> Option<Box<[u8]>> {
-    let hash = hash("bycrypto", data)?;
-    match alg_name {
+    let hash = hash(algorithms, data)?;
+    match &algorithms.signature as &str {
         #[cfg(feature = "bee2-rs")]
-        "bycrypto" => Some(bee2rs::sign(private_key, public_key, &hash)),
+        "bee2-rs::bignb3" => Some(bee2rs::sign(private_key, public_key, &hash)),
         _ => None,
     }
 }
 
 pub fn verify(
-    alg_name: &str,
+    algorithms: &CryptoAlgorithms,
     public_key: PublicKey,
     data: &[u8],
     signature: &[u8],
 ) -> Option<bool> {
-    let hash = hash(alg_name, data)?;
-    match alg_name {
+    let hash = hash(algorithms, data)?;
+    match &algorithms.signature as &str {
         #[cfg(feature = "bee2-rs")]
-        "bycrypto" => Some(bee2rs::verify(public_key, &hash, signature)),
+        "bee2-rs::bignb3" => Some(bee2rs::verify(public_key, &hash, signature)),
         _ => None,
     }
 }
 
 pub fn diffie_hellman(
-    alg_name: &str,
+    algorithms: &CryptoAlgorithms,
     self_private_key: PrivateKey,
     self_public_key: PublicKey,
     other_public_key: PublicKey,
 ) -> Option<Box<[u8]>> {
-    match alg_name {
+    match &algorithms.diffie_hellman as &str {
         #[cfg(feature = "bee2-rs")]
-        "bycrypto" => Some(bee2rs::diffie_hellman(
+        "bee2-rs::bignb3" => Some(bee2rs::diffie_hellman(
             self_private_key,
             self_public_key,
             other_public_key,
@@ -196,10 +175,18 @@ pub fn diffie_hellman(
     }
 }
 
-pub fn kdf(alg_name: &str, data: &[u8], result_len: usize) -> Option<Box<[u8]>> {
-    match alg_name {
+pub fn kdf(algorithms: &CryptoAlgorithms, data: &[u8], result_len: usize) -> Option<Box<[u8]>> {
+    match &algorithms.kdf as &str {
         #[cfg(feature = "bee2-rs")]
-        "bycrypto" => Some(bee2rs::kdf(data, result_len)),
+        "bee2-rs::pbkdf2" => Some(bee2rs::kdf(data, result_len)),
+        _ => None,
+    }
+}
+
+pub fn kdf_keypair(algorithms: &CryptoAlgorithms, data: &[u8]) -> Option<(PrivateKey, PublicKey)> {
+    match &algorithms.kdf as &str {
+        #[cfg(feature = "bee2-rs")]
+        "bee2-rs::pbkdf2" => Some(bee2rs::kdf_keypair(&algorithms.signature, data)),
         _ => None,
     }
 }
@@ -207,48 +194,56 @@ pub fn kdf(alg_name: &str, data: &[u8], result_len: usize) -> Option<Box<[u8]>> 
 type ByteData = Box<[u8]>;
 
 pub fn aead_wrap(
-    alg_name: &str,
+    algorithms: &CryptoAlgorithms,
     plaintext: &[u8],
     key: PrivateKey,
     public_data: &[u8],
 ) -> Option<(ByteData, ByteData)> {
-    match alg_name {
+    match &algorithms.aead as &str {
         #[cfg(feature = "bee2-rs")]
-        "bycrypto" => Some(bee2rs::aead_wrap(plaintext, key, public_data)),
+        "bee2-rs::belt256-dwp" => Some(bee2rs::aead_wrap(plaintext, key, public_data)),
+        #[cfg(feature = "aes-gcm")]
+        "rustcrypto::aes-gcm" => Some(aes_gcm::aead_wrap(plaintext, key, public_data)),
         _ => None,
     }
 }
 
 pub fn aead_unwrap(
-    alg_name: &str,
+    algorithms: &CryptoAlgorithms,
     ciphertext: &[u8],
     public_data: &[u8],
     mac: &[u8],
     key: PrivateKey,
 ) -> Option<Option<Box<[u8]>>> {
-    match alg_name {
+    match &algorithms.aead as &str {
         #[cfg(feature = "bee2-rs")]
-        "bycrypto" => Some(bee2rs::aead_unwrap(ciphertext, public_data, mac, key)),
+        "bee2-rs::belt256-dwp" => Some(bee2rs::aead_unwrap(ciphertext, public_data, mac, key)),
+        #[cfg(feature = "aes-gcm")]
+        "rustcrypto::aes-gcm" => Some(aes_gcm::aead_unwrap(ciphertext, public_data, mac, key)),
         _ => None,
     }
 }
 
-pub fn symmetric_encrypt(alg_name: &str, plaintext: &[u8], key: &[u8]) -> Option<Box<[u8]>> {
-    match alg_name {
+pub fn symmetric_encrypt(algorithms: &CryptoAlgorithms, plaintext: &[u8], key: &[u8]) -> Option<Box<[u8]>> {
+    match &algorithms.symmetric_encryption as &str {
         #[cfg(feature = "bee2-rs")]
-        "bycrypto" => Some(bee2rs::symmetric_encrypt(plaintext, key)),
+        "bee2-rs::belt-ctr" => Some(bee2rs::symmetric_encrypt(plaintext, key)),
+        #[cfg(feature = "aes-gcm")]
+        "rustcrypto::aes-gcm" => Some(aes_gcm::symmetric_encrypt(plaintext, key)),
         _ => None,
     }
 }
 
 pub fn symmetric_decrypt(
-    alg_name: &str,
+    algorithms: &CryptoAlgorithms,
     ciphertext: &[u8],
     key: &[u8],
 ) -> Option<Option<Box<[u8]>>> {
-    match alg_name {
+    match &algorithms.symmetric_encryption as &str {
         #[cfg(feature = "bee2-rs")]
-        "bycrypto" => Some(bee2rs::symmetric_decrypt(ciphertext, key)),
+        "bee2-rs::belt-ctr" => Some(bee2rs::symmetric_decrypt(ciphertext, key)),
+        #[cfg(feature = "aes-gcm")]
+        "rustcrypto::aes-gcm" => Some(aes_gcm::symmetric_decrypt(ciphertext, key)),
         _ => None,
     }
 }
@@ -259,29 +254,38 @@ pub enum KeyStrength {
     ExtremelyHigh,
 }
 
-pub fn symmetric_genkey(alg_name: &str, strength: KeyStrength) -> Option<Box<[u8]>> {
-    match alg_name {
+pub fn symmetric_genkey(algorithms: &CryptoAlgorithms, strength: KeyStrength) -> Option<Box<[u8]>> {
+    match &algorithms.rng as &str {
         #[cfg(feature = "bee2-rs")]
-        "bycrypto" => Some(bee2rs::symmetric_genkey(strength)),
+        "bee2-rs::belt-ctr" => Some(bee2rs::symmetric_genkey(&algorithms.symmetric_encryption, strength)),
         _ => None,
     }
 }
 
-pub fn supported_algorithms() -> Vec<&'static str> {
+pub fn rng_fill(algorithms: &CryptoAlgorithms, buffer: &mut [u8]) -> Option<()> {
+    match &algorithms.rng as &str {
+        #[cfg(feature = "bee2-rs")]
+        "bee2-rs::belt-ctr" => {
+            bee2rs::rng_fill(buffer);
+            Some(())
+        },
+        "default" => {
+            rand::rng().fill_bytes(buffer);
+            Some(())
+        },
+        _ => None,
+    }
+}
+
+pub fn supported_algorithms() -> Vec<CryptoAlgorithms> {
     vec![
         #[cfg(feature = "bee2-rs")]
-        "bycrypto",
+        CryptoAlgorithms::prequantum_bee2rs(),
+        #[cfg(all(feature = "aes-gcm", feature = "curve25519-dalek", feature = "pbkdf2"))]
+        CryptoAlgorithms::prequantum_standard(),
     ]
 }
 
-pub fn to_encryption_method(alg_name: &str) -> String {
-    #[cfg(feature = "bee2-rs")]
-    if alg_name == "bycrypto" {
-        return "belt-ctr".to_owned();
-    }
-    "none".to_owned()
-}
-
-pub fn preferred_alogirthm() -> &'static str {
-    supported_algorithms()[0]
+pub fn preferred_alogirthm() -> CryptoAlgorithms {
+    supported_algorithms()[0].clone()
 }

@@ -8,6 +8,13 @@ rand = "0.9"
 serde = "1.0"
 postcard = { workspace = true }
 atomic-write-file = "0.2"
+aes-gcm = { version = "0.10", optional = true }
+chacha20poly1305 = { version = "0.10", optional = true }
+x25519-dalek = { version = "2", optional = true }
+ed25519-dalek = { version = "2", optional = true }
+k256 = { version = "0.13", optional = true, features = ["ecdh", "ecdsa"] }
+pbkdf2 = { version = "0.12", optional = true }
+sha3 = { version = "0.10", optional = true }
 
 [dependencies.bee2-rs]
 git = "https://github.com/tpyauheni/bee2-rs.git"
@@ -16,5 +23,10 @@ features = ["belt-ctr", "belt-hmac", "belt-pbkdf2", "bign", "bash-full", "belt-d
 optional = true
 
 [features]
-default = ["bee2-rs"]
+default = ["bee2-rs", "aes-gcm", "chacha20poly1305", "curve25519-dalek", "k256", "pbkdf2"]
 bee2-rs = ["dep:bee2-rs"]
+aes-gcm = ["dep:aes-gcm"]
+chacha20poly1305 = ["dep:chacha20poly1305"]
+curve25519-dalek = ["dep:ed25519-dalek", "dep:x25519-dalek"]
+k256 = ["dep:k256"]
+pbkdf2 = ["dep:pbkdf2"]
