@@ -26,10 +26,6 @@ impl Database {
         })
     }
 
-    pub fn new(url: &str) -> Self {
-        Self::try_new(url).unwrap()
-    }
-
     pub fn init(&self) -> DbResult<()> {
         let mut conn = self.pool.get_conn()?;
         conn.query_drop(
@@ -175,6 +171,10 @@ impl Database {
         username: Option<&str>,
     ) -> DbResult<u64> {
         let mut conn = self.pool.get_conn()?;
+        let public_x3dh_data = to_allocvec(&public_x3dh_data)?;
+        if let Err(err) = from_bytes::<X3DhReceiverKeysPublic>(&public_x3dh_data) {
+            eprintln!("From bytes failed for public X3DH data: {err:?}");
+        };
         conn.exec_drop(
             r"INSERT INTO `accounts` (
                 `public_key`,
@@ -185,7 +185,7 @@ impl Database {
             ) VALUES (?, ?, ?, ?, ?);",
             (
                 public_key,
-                to_allocvec(&public_x3dh_data)?,
+                public_x3dh_data,
                 encrypted_private_info,
                 email,
                 username,
@@ -486,6 +486,9 @@ impl Database {
     }
 
     pub fn find_user_with_pubkey(&self, account_name: String, public_key: &[u8]) -> DbResult<Option<u64>> {
+        if account_name.len() >= 256 {
+            return Ok(None);
+        };
         let mut conn = self.pool.get_conn()?;
         let account: Option<u64> = conn.exec_first(
             r"SELECT `id` FROM `accounts`
@@ -942,20 +945,15 @@ impl Database {
 static RNG: LazyLock<Arc<Mutex<StdRng>>> =
     LazyLock::new(|| Arc::new(Mutex::new(StdRng::from_os_rng())));
 pub static DB: LazyLock<Database> =
-    LazyLock::new(|| Database::new(&std::env::var("DB_URL").unwrap()));
+    LazyLock::new(|| Database::try_new(&std::env::var("DB_URL").unwrap()).unwrap());
 
 // TODO: Move into another module
 pub mod rng {
     use super::RNG;
-    use rand::{RngCore, rngs::StdRng};
-    use std::sync::{Arc, Mutex};
-
-    pub fn get_rng() -> Arc<Mutex<StdRng>> {
-        RNG.clone()
-    }
+    use rand::RngCore;
 
     pub fn fill_bytes(destination: &mut [u8]) {
-        get_rng().lock().unwrap().fill_bytes(destination);
+        RNG.lock().unwrap().fill_bytes(destination);
     }
 }
 
@@ -972,7 +970,7 @@ mod tests {
     use shared::crypto::{x3dh::{self, X3DhReceiverKeysPublic}, preferred_alogirthm};
 
     static DB: LazyLock<Database> =
-        LazyLock::new(|| Database::new(&std::env::var("TEST_DB_URL").unwrap()));
+        LazyLock::new(|| Database::try_new(&std::env::var("TEST_DB_URL").unwrap()).unwrap());
     static INIT: Once = Once::new();
     static DB_TEST_NUMBER: LazyLock<Mutex<usize>> = LazyLock::new(|| Mutex::new(0));
     static CRYPTOIDENTITIES: LazyLock<Mutex<HashMap<u64, X3DhReceiverKeysPublic>>> =

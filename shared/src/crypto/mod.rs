@@ -28,13 +28,13 @@ pub struct PrivateKey {
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct CryptoAlgorithms {
-    hash: String,
-    kdf: String,
-    diffie_hellman: String,
-    signature: String,
-    symmetric_encryption: String,
-    aead: String,
-    rng: String,
+    pub hash: String,
+    pub kdf: String,
+    pub diffie_hellman: String,
+    pub signature: String,
+    pub symmetric_encryption: String,
+    pub aead: String,
+    pub rng: String,
 }
 
 impl FromStr for CryptoAlgorithms {
@@ -125,7 +125,7 @@ pub fn hash(algorithms: &CryptoAlgorithms, data: &[u8]) -> Option<Box<[u8]>> {
 pub fn generate_keypair(algorithms: &CryptoAlgorithms) -> Option<(PrivateKey, PublicKey)> {
     match &algorithms.rng as &str {
         #[cfg(feature = "bee2-rs")]
-        "bee2-rs::bignb3" => Some(bee2rs::generate_keypair(&algorithms.signature)),
+        "bee2-rs::belt-ctr" => Some(bee2rs::generate_keypair(&algorithms.signature)),
         _ => None,
     }
 }

@@ -16,8 +16,8 @@ fn generate_encrypted_shared_key(
         return None;
     };
     let crypto_alg = crypto::preferred_alogirthm();
-    let (private_keys, public_keys) = STORAGE.x3dh_data(crypto_alg);
-    let shared_key = crypto::symmetric_genkey(crypto_alg, crypto::KeyStrength::ExtremelyHigh)?;
+    let (private_keys, public_keys) = STORAGE.x3dh_data(&crypto_alg);
+    let shared_key = crypto::symmetric_genkey(&crypto_alg, crypto::KeyStrength::ExtremelyHigh)?;
     let Ok(encrypted_shared_key) = x3dh::encode_x3dh(
         &shared_key,
         private_keys.ik,

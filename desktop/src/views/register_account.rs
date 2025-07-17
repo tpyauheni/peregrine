@@ -166,18 +166,16 @@ pub fn RegisterAccount() -> Element {
             return;
         }
 
-        // FIXME:
-        let cryptoset = shared::crypto::default_cryptoset(password.as_bytes(), None);
-        let public_key = cryptoset.asymmetric_cipher.into_public_key_bytes();
+        let (_private_key, public_key) = crypto::kdf_keypair(&crypto::preferred_alogirthm(), password.as_bytes()).unwrap();
         info!(
             "Submitting form: email='{email}', username='{username}', server='{server}', public_key={public_key:?}"
         );
         error_sig.set(None);
-        let (_, x3dh_public) = STORAGE.x3dh_data(crypto::preferred_alogirthm());
+        let (_, x3dh_public) = STORAGE.x3dh_data(&crypto::preferred_alogirthm());
         let (account_id, session_token) = server::create_account(
             email.to_owned(),
             username.to_owned(),
-            public_key,
+            public_key.pk,
             x3dh_public,
         )
         .await
@@ -373,8 +371,7 @@ pub fn LoginAccount() -> Element {
             return;
         }
 
-        let mut cryptoset = shared::crypto::default_cryptoset(password.as_bytes(), None);
-        let public_key = cryptoset.asymmetric_cipher.clone().into_public_key_bytes();
+        let (private_key, public_key) = crypto::kdf_keypair(&crypto::preferred_alogirthm(), password.as_bytes()).unwrap();
         let session_params = SessionParams {
             current_timestamp: chrono::Utc::now().timestamp().cast_unsigned(),
             authorize_before_seconds: LIMITS.max_session_before_period,
@@ -382,8 +379,8 @@ pub fn LoginAccount() -> Element {
             session_validity_seconds: LIMITS.max_session_validity_period,
         };
         let session_params_bytes = session_params.to_boxed_slice();
-        let signature = cryptoset.asymmetric_cipher.sign(&session_params_bytes, &mut cryptoset.rng);
-        if !cryptoset.asymmetric_cipher.verify(&session_params_bytes, &signature) {
+        let signature = crypto::sign(&crypto::preferred_alogirthm(), private_key, public_key.clone(), &session_params_bytes).unwrap();
+        if !crypto::verify(&crypto::preferred_alogirthm(), public_key.clone(), &session_params_bytes, &signature).unwrap() {
             error!("Failed to verify login signature on client-side, will probably be rejected by server.");
         }
         info!(
@@ -393,8 +390,8 @@ pub fn LoginAccount() -> Element {
 
         let (account_id, session_token) = match server::login_account(
             login.to_owned(),
-            crypto::preferred_alogirthm().to_owned(),
-            public_key,
+            crypto::preferred_alogirthm().signature,
+            public_key.pk,
             session_params,
             signature,
         ).await {
