@@ -234,3 +234,12 @@ a:focus {
     width: 19px;
     height: 16px;
 }
+
+.message p {
+    margin: 0;
+}
+
+.message span pre {
+    background-color: #222 !important;
+    padding: 12px;
+}

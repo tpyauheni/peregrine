@@ -3,6 +3,7 @@ use std::{rc::Rc, time::Duration};
 use chrono::Local;
 use client::{cache::CACHE, future_retry_loop, packet_sender::PacketState, storage::STORAGE};
 use dioxus::{logger::tracing::error, prelude::*};
+use dioxus_markdown::Markdown;
 use server::{
     AccountCredentials, DmGroup, DmMessage, FoundAccount, GroupMessage, MessageStatus,
     MultiUserGroup,
@@ -735,7 +736,7 @@ fn DmMessageComponent(contact_id: u64, message: DmMessage) -> Element {
             match crypto::symmetric_decrypt(&key.0, &message.content, &key.1) {
                 Some(Some(plaintext)) => {
                     let plain_string = String::from_utf8_lossy(&plaintext);
-                    rsx!({ plain_string })
+                    rsx!(Markdown { src: plain_string })
                 },
                 status => {
                     println!("Decryption failed: {status:?}");
@@ -747,7 +748,7 @@ fn DmMessageComponent(contact_id: u64, message: DmMessage) -> Element {
         }
     } else {
         let plain_string = String::from_utf8_lossy(&message.content);
-        rsx!({ plain_string })
+        rsx!(Markdown { src: plain_string })
     };
     let sent_by_me = message.status != MessageStatus::SentByOther;
     let time = if let Some(time) = message.sent_time {
@@ -917,7 +918,7 @@ fn GroupMessageComponent(
             if let Some(Some(plaintext)) =
                 crypto::symmetric_decrypt(&key.0, &message.content, &key.1)
             {
-                rsx!({ String::from_utf8_lossy(&plaintext) })
+                rsx!(Markdown { src: String::from_utf8_lossy(&plaintext) })
             } else {
                 rsx!(p { style: "color:#f00", "Failed to decrypt message" })
             }
@@ -925,7 +926,7 @@ fn GroupMessageComponent(
             rsx!(p { style: "color:#f00", "Failed to decrypt message" })
         }
     } else {
-        rsx!({ String::from_utf8_lossy(&message.content) })
+        rsx!(Markdown { src: String::from_utf8_lossy(&message.content) })
     };
     rsx! {
         {author}
