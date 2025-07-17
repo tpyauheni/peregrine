@@ -348,6 +348,11 @@ pub async fn login_account(
             ServerError::LimitExceeded,
         ));
     };
+    if public_key.len() > LIMITS.max_public_key_length {
+        return Err(ServerFnError::WrappedServerError(
+            ServerError::LimitExceeded,
+        ));
+    }
     let unix_secs_now = current_time
         .signed_duration_since(DateTime::UNIX_EPOCH)
         .num_seconds()
