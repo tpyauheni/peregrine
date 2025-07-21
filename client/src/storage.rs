@@ -4,7 +4,10 @@ use platform_dirs::AppDirs;
 use server::AccountCredentials;
 
 use shared::{
-    crypto::{x3dh::{self, X3DhReceiverKeysPrivate, X3DhReceiverKeysPublic}, CryptoAlgorithms},
+    crypto::{
+        CryptoAlgorithms,
+        x3dh::{self, X3DhReceiverKeysPrivate, X3DhReceiverKeysPublic},
+    },
     storage::{GeneralStorage, RawStorage},
 };
 
@@ -94,7 +97,10 @@ impl Storage {
         [group_id: u64],
     );
 
-    pub fn x3dh_data(&self, algorithms: &CryptoAlgorithms) -> (X3DhReceiverKeysPrivate, X3DhReceiverKeysPublic) {
+    pub fn x3dh_data(
+        &self,
+        algorithms: &CryptoAlgorithms,
+    ) -> (X3DhReceiverKeysPrivate, X3DhReceiverKeysPublic) {
         if let Some(data) = self.load_x3dh_data(algorithms) {
             data
         } else {

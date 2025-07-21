@@ -1,10 +1,13 @@
-#[cfg(feature = "bee2-rs")]
-pub mod bee2rs;
 #[cfg(feature = "aes-gcm")]
 pub mod aes_gcm;
+#[cfg(feature = "bee2-rs")]
+pub mod bee2rs;
 pub mod x3dh;
 
-use std::{fmt::{Debug, Display}, str::FromStr};
+use std::{
+    fmt::{Debug, Display},
+    str::FromStr,
+};
 
 use rand::RngCore;
 use serde::{Deserialize, Serialize};
@@ -105,12 +108,10 @@ impl CryptoAlgorithms {
     }
 
     pub fn encryption_method(&self) -> String {
-        self.symmetric_encryption
-            .split_once("::")
-            .map_or_else(
-                || self.symmetric_encryption.clone(),
-                |(_, value)| value.to_owned(),
-            )
+        self.symmetric_encryption.split_once("::").map_or_else(
+            || self.symmetric_encryption.clone(),
+            |(_, value)| value.to_owned(),
+        )
     }
 }
 
@@ -224,7 +225,11 @@ pub fn aead_unwrap(
     }
 }
 
-pub fn symmetric_encrypt(algorithms: &CryptoAlgorithms, plaintext: &[u8], key: &[u8]) -> Option<Box<[u8]>> {
+pub fn symmetric_encrypt(
+    algorithms: &CryptoAlgorithms,
+    plaintext: &[u8],
+    key: &[u8],
+) -> Option<Box<[u8]>> {
     match &algorithms.symmetric_encryption as &str {
         #[cfg(feature = "bee2-rs")]
         "bee2-rs::belt-ctr" => Some(bee2rs::symmetric_encrypt(plaintext, key)),
@@ -257,7 +262,10 @@ pub enum KeyStrength {
 pub fn symmetric_genkey(algorithms: &CryptoAlgorithms, strength: KeyStrength) -> Option<Box<[u8]>> {
     match &algorithms.rng as &str {
         #[cfg(feature = "bee2-rs")]
-        "bee2-rs::belt-ctr" => Some(bee2rs::symmetric_genkey(&algorithms.symmetric_encryption, strength)),
+        "bee2-rs::belt-ctr" => Some(bee2rs::symmetric_genkey(
+            &algorithms.symmetric_encryption,
+            strength,
+        )),
         _ => None,
     }
 }
@@ -268,11 +276,11 @@ pub fn rng_fill(algorithms: &CryptoAlgorithms, buffer: &mut [u8]) -> Option<()> 
         "bee2-rs::belt-ctr" => {
             bee2rs::rng_fill(buffer);
             Some(())
-        },
+        }
         "default" => {
             rand::rng().fill_bytes(buffer);
             Some(())
-        },
+        }
         _ => None,
     }
 }

@@ -99,8 +99,7 @@ impl Database {
                 `file_name` BLOB({})
             );
         ",
-            LIMITS.max_encryption_method_length,
-            LIMITS.max_file_name_length,
+            LIMITS.max_encryption_method_length, LIMITS.max_file_name_length,
         ))?;
         conn.query_drop(format!(
             r"
@@ -116,8 +115,7 @@ impl Database {
                 `file_name` BLOB({})
             );
         ",
-            LIMITS.max_encryption_method_length,
-            LIMITS.max_file_name_length,
+            LIMITS.max_encryption_method_length, LIMITS.max_file_name_length,
         ))?;
         conn.query_drop(
             r"
@@ -323,7 +321,13 @@ impl Database {
                 `delivered`,
                 `file_name`
             ) VALUES (?, ?, ?, NULL, NULL, ?, IFNULL(?, CURRENT_TIMESTAMP()), 0, NULL)",
-            (group_id, sender_id, encryption_method, Some(content), send_time),
+            (
+                group_id,
+                sender_id,
+                encryption_method,
+                Some(content),
+                send_time,
+            ),
         )?;
         Ok(conn.query_first("SELECT LAST_INSERT_ID();")?.unwrap())
     }
@@ -522,7 +526,11 @@ impl Database {
         )?)
     }
 
-    pub fn find_user_with_pubkey(&self, account_name: String, public_key: &[u8]) -> DbResult<Option<u64>> {
+    pub fn find_user_with_pubkey(
+        &self,
+        account_name: String,
+        public_key: &[u8],
+    ) -> DbResult<Option<u64>> {
         if account_name.len() >= 256 {
             return Ok(None);
         };
@@ -638,7 +646,13 @@ impl Database {
                 `content`,
                 `send_time`
             ) VALUES (?, ?, ?, NULL, NULL, ?, IFNULL(?, CURRENT_TIMESTAMP()))",
-            (group_id, sender_id, encryption_method, Some(content), send_time),
+            (
+                group_id,
+                sender_id,
+                encryption_method,
+                Some(content),
+                send_time,
+            ),
         )?;
         Ok(conn.query_first("SELECT LAST_INSERT_ID();")?.unwrap())
     }
@@ -1068,7 +1082,10 @@ mod tests {
     use crate::{DmInvite, MessageStatus, secret::db::Account};
 
     use super::Database;
-    use shared::crypto::{x3dh::{self, X3DhReceiverKeysPublic}, preferred_alogirthm};
+    use shared::crypto::{
+        preferred_alogirthm,
+        x3dh::{self, X3DhReceiverKeysPublic},
+    };
 
     static DB: LazyLock<Database> =
         LazyLock::new(|| Database::try_new(&std::env::var("TEST_DB_URL").unwrap()).unwrap());
@@ -1352,7 +1369,10 @@ mod tests {
             let dm_messages1 = DB.get_dm_messages(0, dm_group1, 1).unwrap();
             assert_eq!(dm_messages1[0].id, 1);
             assert_eq!(dm_messages1[0].encryption_method, "!plaintext");
-            assert_eq!(dm_messages1[0].content, Some("Hello, World!".as_bytes().into()));
+            assert_eq!(
+                dm_messages1[0].content,
+                Some("Hello, World!".as_bytes().into())
+            );
             assert_eq!(dm_messages1[0].reply_to, None);
             assert_eq!(dm_messages1[0].edit_for, None);
             assert_eq!(dm_messages1[0].status, MessageStatus::Delivered);

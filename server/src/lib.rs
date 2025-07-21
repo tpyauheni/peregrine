@@ -17,7 +17,10 @@ use shared::crypto::PublicKey;
 use shared::limits::LIMITS;
 #[cfg(feature = "server")]
 use shared::types::GroupPermissions;
-use shared::{crypto::{x3dh::X3DhReceiverKeysPublic, CryptoAlgorithms}, types::{File, UserIcon}};
+use shared::{
+    crypto::{CryptoAlgorithms, x3dh::X3DhReceiverKeysPublic},
+    types::{File, UserIcon},
+};
 
 #[cfg(feature = "server")]
 use crate::secret::db::DB;
@@ -1426,7 +1429,13 @@ pub async fn send_dm_file(
         ));
     }
 
-    let message_id = match DB.send_dm_file(credentials.id, group_id, &encryption_method, &encrypted_file_name, None) {
+    let message_id = match DB.send_dm_file(
+        credentials.id,
+        group_id,
+        &encryption_method,
+        &encrypted_file_name,
+        None,
+    ) {
         Ok(id) => Ok(id),
         Err(err) => {
             error!("Failed to send DM file: {err:?}");
@@ -1468,7 +1477,13 @@ pub async fn send_group_file(
         ));
     }
 
-    let message_id = match DB.send_group_file(credentials.id, group_id, &encryption_method, &encrypted_file_name, None) {
+    let message_id = match DB.send_group_file(
+        credentials.id,
+        group_id,
+        &encryption_method,
+        &encrypted_file_name,
+        None,
+    ) {
         Ok(id) => Ok(id),
         Err(err) => {
             error!("Failed to send DM file: {err:?}");
@@ -1491,9 +1506,7 @@ pub async fn get_dm_file(
         Ok(Some((group_id, encryption_method, file_name))) => {
             check_is_in_dm_group(credentials.id, group_id)?;
             let Some(content) = STORAGE.load_dm_file(message_id) else {
-                return Err(ServerFnError::WrappedServerError(
-                    ServerError::FileNotFound,
-                ));
+                return Err(ServerFnError::WrappedServerError(ServerError::FileNotFound));
             };
             Ok(File {
                 name: file_name,
@@ -1501,11 +1514,7 @@ pub async fn get_dm_file(
                 encryption_method,
             })
         }
-        Ok(None) => {
-            Err(ServerFnError::WrappedServerError(
-                ServerError::FileNotFound,
-            ))
-        }
+        Ok(None) => Err(ServerFnError::WrappedServerError(ServerError::FileNotFound)),
         Err(err) => {
             error!("Failed to get DM file: {err:?}");
             Err(ServerFnError::WrappedServerError(
@@ -1525,9 +1534,7 @@ pub async fn get_group_file(
         Ok(Some((group_id, encryption_method, file_name))) => {
             check_is_in_group(credentials.id, group_id)?;
             let Some(content) = STORAGE.load_group_file(message_id) else {
-                return Err(ServerFnError::WrappedServerError(
-                    ServerError::FileNotFound,
-                ));
+                return Err(ServerFnError::WrappedServerError(ServerError::FileNotFound));
             };
             Ok(File {
                 name: file_name,
@@ -1535,11 +1542,7 @@ pub async fn get_group_file(
                 encryption_method,
             })
         }
-        Ok(None) => {
-            Err(ServerFnError::WrappedServerError(
-                ServerError::FileNotFound,
-            ))
-        }
+        Ok(None) => Err(ServerFnError::WrappedServerError(ServerError::FileNotFound)),
         Err(err) => {
             error!("Failed to get group file: {err:?}");
             Err(ServerFnError::WrappedServerError(

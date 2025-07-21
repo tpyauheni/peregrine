@@ -87,7 +87,7 @@ pub fn encode_x3dh(
     ik_pub: PublicKey,
     other_keys: X3DhReceiverKeysPublic,
 ) -> Result<X3DhData, X3DhError> {
-    let algorithms= &other_keys.algorithms;
+    let algorithms = &other_keys.algorithms;
 
     match verify(
         algorithms,
@@ -176,7 +176,7 @@ pub fn decode_x3dh(
     self_keys_public: X3DhReceiverKeysPublic,
     self_keys_private: X3DhReceiverKeysPrivate,
 ) -> Result<Box<[u8]>, X3DhError> {
-    let algorithms= &self_keys_public.algorithms;
+    let algorithms = &self_keys_public.algorithms;
 
     let mut signed_data = vec![];
     signed_data.extend(data.ek_pub.pk.clone());
@@ -248,7 +248,10 @@ pub fn decode_x3dh(
 
 #[cfg(test)]
 mod tests {
-    use crate::crypto::{x3dh::{decode_x3dh, encode_x3dh, generate_receiver_keys}, CryptoAlgorithms};
+    use crate::crypto::{
+        CryptoAlgorithms,
+        x3dh::{decode_x3dh, encode_x3dh, generate_receiver_keys},
+    };
 
     #[test]
     fn test_x3dh() {

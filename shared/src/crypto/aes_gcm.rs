@@ -1,6 +1,13 @@
-use aes_gcm::{aead::Aead, aes::{cipher::{BlockDecrypt, BlockEncrypt}, Aes128Enc, Aes192Dec, Aes192Enc, Aes256Enc}, Aes128Gcm, Aes256Gcm, KeyInit};
+use aes_gcm::{
+    Aes128Gcm, Aes256Gcm, KeyInit,
+    aead::Aead,
+    aes::{
+        Aes128Enc, Aes192Dec, Aes192Enc, Aes256Enc,
+        cipher::{BlockDecrypt, BlockEncrypt},
+    },
+};
 
-use crate::crypto::{get_iv, PrivateKey};
+use crate::crypto::{PrivateKey, get_iv};
 
 pub(super) fn aead_wrap(
     plaintext: &[u8],

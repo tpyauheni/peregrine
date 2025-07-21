@@ -66,8 +66,17 @@ pub(super) fn diffie_hellman(
 pub(super) fn kdf_keypair(asymmetric_algorithm: &str, data: &[u8]) -> (PrivateKey, PublicKey) {
     assert_eq!(asymmetric_algorithm, "bee2-rs::bignb3");
     let mut rng = CtrRng::new((&kdf(data, 32) as &[u8]).try_into().unwrap(), None);
-    let key = BignKey::try_new(BignParameters::try_new(BignParametersConfiguration::B3).unwrap(), &mut rng).unwrap();
-    (PrivateKey { sk: key.private_key }, PublicKey { pk: key.public_key })
+    let key = BignKey::try_new(
+        BignParameters::try_new(BignParametersConfiguration::B3).unwrap(),
+        &mut rng,
+    )
+    .unwrap();
+    (
+        PrivateKey {
+            sk: key.private_key,
+        },
+        PublicKey { pk: key.public_key },
+    )
 }
 
 // TODO: Add to upstream library.

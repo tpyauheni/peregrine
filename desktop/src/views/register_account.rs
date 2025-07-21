@@ -1,5 +1,8 @@
 use client::storage::STORAGE;
-use dioxus::{logger::tracing::{error, info}, prelude::*};
+use dioxus::{
+    logger::tracing::{error, info},
+    prelude::*,
+};
 use server::{AccountCredentials, SessionParams};
 use shared::{crypto, limits::LIMITS};
 
@@ -111,7 +114,6 @@ fn check_server(server: &str) -> Option<String> {
     None
 }
 
-
 #[component]
 pub fn RegisterAccount() -> Element {
     const PANEL_WIDTH: u32 = 480;
@@ -166,7 +168,8 @@ pub fn RegisterAccount() -> Element {
             return;
         }
 
-        let (_private_key, public_key) = crypto::kdf_keypair(&crypto::preferred_alogirthm(), password.as_bytes()).unwrap();
+        let (_private_key, public_key) =
+            crypto::kdf_keypair(&crypto::preferred_alogirthm(), password.as_bytes()).unwrap();
         info!(
             "Submitting form: email='{email}', username='{username}', server='{server}', public_key={public_key:?}"
         );
@@ -371,7 +374,8 @@ pub fn LoginAccount() -> Element {
             return;
         }
 
-        let (private_key, public_key) = crypto::kdf_keypair(&crypto::preferred_alogirthm(), password.as_bytes()).unwrap();
+        let (private_key, public_key) =
+            crypto::kdf_keypair(&crypto::preferred_alogirthm(), password.as_bytes()).unwrap();
         let session_params = SessionParams {
             current_timestamp: chrono::Utc::now().timestamp().cast_unsigned(),
             authorize_before_seconds: LIMITS.max_session_before_period,
@@ -379,9 +383,24 @@ pub fn LoginAccount() -> Element {
             session_validity_seconds: LIMITS.max_session_validity_period,
         };
         let session_params_bytes = session_params.to_boxed_slice();
-        let signature = crypto::sign(&crypto::preferred_alogirthm(), private_key, public_key.clone(), &session_params_bytes).unwrap();
-        if !crypto::verify(&crypto::preferred_alogirthm(), public_key.clone(), &session_params_bytes, &signature).unwrap() {
-            error!("Failed to verify login signature on client-side, will probably be rejected by server.");
+        let signature = crypto::sign(
+            &crypto::preferred_alogirthm(),
+            private_key,
+            public_key.clone(),
+            &session_params_bytes,
+        )
+        .unwrap();
+        if !crypto::verify(
+            &crypto::preferred_alogirthm(),
+            public_key.clone(),
+            &session_params_bytes,
+            &signature,
+        )
+        .unwrap()
+        {
+            error!(
+                "Failed to verify login signature on client-side, will probably be rejected by server."
+            );
         }
         info!(
             "Submitting form: login='{login}', server='{server}', public_key={public_key:?}, session_params={session_params:?}, signature={signature:?}"
@@ -394,7 +413,9 @@ pub fn LoginAccount() -> Element {
             public_key.pk,
             session_params,
             signature,
-        ).await {
+        )
+        .await
+        {
             Ok(value) => value,
             Err(err) => {
                 eprintln!("Error while trying to log into account: {err:?}");

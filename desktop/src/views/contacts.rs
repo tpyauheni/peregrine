@@ -744,7 +744,11 @@ pub fn DmGroupPanel(
 
 #[component]
 #[allow(non_snake_case)]
-fn DmMessageComponent(contact_id: u64, message: DmMessage, credentials: AccountCredentials) -> Element {
+fn DmMessageComponent(
+    contact_id: u64,
+    message: DmMessage,
+    credentials: AccountCredentials,
+) -> Element {
     const ICON_MSG_STATUS_SENT: Asset = asset!(
         "/assets/msg_status_sent_icon.png",
         ImageAssetOptions::new()
@@ -799,7 +803,7 @@ fn DmMessageComponent(contact_id: u64, message: DmMessage, credentials: AccountC
                             },
                             {file_name}
                         })
-                    },
+                    }
                     status => {
                         println!("Decryption failed: {status:?}");
                         rsx!(p { style: "color:#faa", "Failed to decrypt message" })
@@ -810,7 +814,7 @@ fn DmMessageComponent(contact_id: u64, message: DmMessage, credentials: AccountC
                     Some(Some(plaintext)) => {
                         let plain_string = String::from_utf8_lossy(&plaintext);
                         rsx!(Markdown { src: plain_string })
-                    },
+                    }
                     status => {
                         println!("Decryption failed: {status:?}");
                         rsx!(p { style: "color:#faa", "Failed to decrypt message" })
@@ -993,7 +997,9 @@ fn GroupMessageComponent(
             if let Some(Some(plaintext)) =
                 crypto::symmetric_decrypt(&key.0, &message.content.unwrap(), &key.1)
             {
-                rsx!(Markdown { src: String::from_utf8_lossy(&plaintext) })
+                rsx!(Markdown {
+                    src: String::from_utf8_lossy(&plaintext)
+                })
             } else {
                 rsx!(p { style: "color:#f00", "Failed to decrypt message" })
             }
@@ -1001,7 +1007,9 @@ fn GroupMessageComponent(
             rsx!(p { style: "color:#f00", "Failed to decrypt message" })
         }
     } else {
-        rsx!(Markdown { src: String::from_utf8_lossy(message.content.as_ref().unwrap()) })
+        rsx!(Markdown {
+            src: String::from_utf8_lossy(message.content.as_ref().unwrap())
+        })
     };
     rsx! {
         {author}
