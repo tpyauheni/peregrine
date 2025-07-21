@@ -18,6 +18,7 @@ pub struct Database {
 }
 
 type DbResult<T> = Result<T, Box<dyn std::error::Error>>;
+type FileData = Option<(u64, String, Box<[u8]>)>;
 
 impl Database {
     pub fn try_new(url: &str) -> DbResult<Self> {
@@ -82,6 +83,7 @@ impl Database {
             );
         ",
         )?;
+        // TODO: Add indexes.
         conn.query_drop(format!(
             r"
             CREATE TABLE IF NOT EXISTS `dm_messages` (
@@ -91,12 +93,14 @@ impl Database {
                 `encryption_method` VARCHAR({}) NOT NULL,
                 `reply_message_id` BIGINT,
                 `edited_message_id` BIGINT,
-                `content` BLOB NOT NULL,
+                `content` BLOB,
                 `send_time` DATETIME NOT NULL,
-                `delivered` BIT NOT NULL
+                `delivered` BIT NOT NULL,
+                `file_name` BLOB({})
             );
         ",
-            LIMITS.max_encryption_method_length
+            LIMITS.max_encryption_method_length,
+            LIMITS.max_file_name_length,
         ))?;
         conn.query_drop(format!(
             r"
@@ -107,11 +111,13 @@ impl Database {
                 `encryption_method` VARCHAR({}) NOT NULL,
                 `reply_message_id` BIGINT,
                 `edited_message_id` BIGINT,
-                `content` BLOB NOT NULL,
-                `send_time` DATETIME NOT NULL
+                `content` BLOB,
+                `send_time` DATETIME NOT NULL,
+                `file_name` BLOB({})
             );
         ",
-            LIMITS.max_encryption_method_length
+            LIMITS.max_encryption_method_length,
+            LIMITS.max_file_name_length,
         ))?;
         conn.query_drop(
             r"
@@ -314,9 +320,36 @@ impl Database {
                 `edited_message_id`,
                 `content`,
                 `send_time`,
-                `delivered`
-            ) VALUES (?, ?, ?, NULL, NULL, ?, IFNULL(?, CURRENT_TIMESTAMP()), 0)",
-            (group_id, sender_id, encryption_method, content, send_time),
+                `delivered`,
+                `file_name`
+            ) VALUES (?, ?, ?, NULL, NULL, ?, IFNULL(?, CURRENT_TIMESTAMP()), 0, NULL)",
+            (group_id, sender_id, encryption_method, Some(content), send_time),
+        )?;
+        Ok(conn.query_first("SELECT LAST_INSERT_ID();")?.unwrap())
+    }
+
+    pub fn send_dm_file(
+        &self,
+        sender_id: u64,
+        group_id: u64,
+        encryption_method: &str,
+        file_name: &[u8],
+        send_time: Option<chrono::NaiveDateTime>,
+    ) -> DbResult<u64> {
+        let mut conn = self.pool.get_conn()?;
+        conn.exec_drop(
+            r"INSERT INTO `dm_messages` (
+                `group_id`,
+                `sender_id`,
+                `encryption_method`,
+                `reply_message_id`,
+                `edited_message_id`,
+                `content`,
+                `send_time`,
+                `delivered`,
+                `file_name`
+            ) VALUES (?, ?, ?, NULL, NULL, NULL, IFNULL(?, CURRENT_TIMESTAMP()), 0, ?)",
+            (group_id, sender_id, encryption_method, send_time, file_name),
         )?;
         Ok(conn.query_first("SELECT LAST_INSERT_ID();")?.unwrap())
     }
@@ -337,7 +370,8 @@ impl Database {
                 `edited_message_id`,
                 `content`,
                 `send_time`,
-                `delivered`
+                `delivered`,
+                `file_name`
                 FROM `dm_messages`
                 WHERE `id` > ?
                     AND `group_id` = ?
@@ -353,9 +387,11 @@ impl Database {
                 content,
                 send_time,
                 delivered_bytes,
+                file_name,
             )| {
                 let _: u64 = sender_id;
                 let _: Box<[u8]> = delivered_bytes;
+                let _: Option<Box<[u8]>> = content;
                 let delivered = delivered_bytes[0] != 0;
                 DmMessage {
                     id,
@@ -371,6 +407,7 @@ impl Database {
                     } else {
                         MessageStatus::Sent
                     },
+                    file_name,
                 }
             },
         )?;
@@ -601,9 +638,35 @@ impl Database {
                 `content`,
                 `send_time`
             ) VALUES (?, ?, ?, NULL, NULL, ?, IFNULL(?, CURRENT_TIMESTAMP()))",
-            (group_id, sender_id, encryption_method, content, send_time),
+            (group_id, sender_id, encryption_method, Some(content), send_time),
         )?;
         Ok(conn.query_first("SELECT LAST_INSERT_ID();")?.unwrap())
+    }
+
+    pub fn send_group_file(
+        &self,
+        sender_id: u64,
+        group_id: u64,
+        encryption_method: &str,
+        file_name: &[u8],
+        send_time: Option<chrono::NaiveDateTime>,
+    ) -> DbResult<u64> {
+        let mut conn = self.pool.get_conn()?;
+        conn.exec_drop(
+            r"INSERT INTO `group_messages` (
+                `group_id`,
+                `sender_id`,
+                `encryption_method`,
+                `reply_message_id`,
+                `edited_message_id`,
+                `content`,
+                `send_time`,
+                `file_name`
+            ) VALUES (?, ?, ?, NULL, NULL, NULL, IFNULL(?, CURRENT_TIMESTAMP()), ?)",
+            (group_id, sender_id, encryption_method, send_time, file_name),
+        )?;
+        let message_id = conn.query_first("SELECT LAST_INSERT_ID();")?.unwrap();
+        Ok(message_id)
     }
 
     pub fn get_group_messages(
@@ -620,7 +683,8 @@ impl Database {
                 `reply_message_id`,
                 `edited_message_id`,
                 `content`,
-                `send_time`
+                `send_time`,
+                `file_name`
                 FROM `group_messages`
                 WHERE `id` > ?
                     AND `group_id` = ?
@@ -635,8 +699,10 @@ impl Database {
                 edited_message_id,
                 content,
                 send_time,
+                file_name,
             )| {
                 let _: u64 = sender_id;
+                let _: Option<Box<[u8]>> = content;
                 GroupMessage {
                     id,
                     sender_id,
@@ -645,6 +711,7 @@ impl Database {
                     reply_to: reply_message_id,
                     edit_for: edited_message_id,
                     sent_time: send_time,
+                    file_name,
                 }
             },
         )?;
@@ -923,6 +990,40 @@ impl Database {
         };
         let _: Box<[u8]> = permission_bytes;
         Ok(Some(GroupPermissions::from_bytes(&permission_bytes)))
+    }
+
+    pub fn get_dm_file_data(&self, message_id: u64) -> DbResult<FileData> {
+        let mut conn = self.pool.get_conn()?;
+        let Some(mut row): Option<Row> = conn.exec_first(
+            r"SELECT `group_id`, `encryption_method`, `file_name`
+            FROM `dm_messages`
+            WHERE `id` = ?;",
+            (message_id,),
+        )?
+        else {
+            return Ok(None);
+        };
+        let group_id: u64 = row.take_opt(0).unwrap()?;
+        let encryption_method: String = row.take_opt(1).unwrap()?;
+        let file_name: Box<[u8]> = row.take_opt(2).unwrap()?;
+        Ok(Some((group_id, encryption_method, file_name)))
+    }
+
+    pub fn get_group_file_data(&self, message_id: u64) -> DbResult<FileData> {
+        let mut conn = self.pool.get_conn()?;
+        let Some(mut row): Option<Row> = conn.exec_first(
+            r"SELECT `group_id`, `encryption_method`, `file_name`
+            FROM `group_messages`
+            WHERE `id` = ?;",
+            (message_id,),
+        )?
+        else {
+            return Ok(None);
+        };
+        let group_id: u64 = row.take_opt(0).unwrap()?;
+        let encryption_method: String = row.take_opt(1).unwrap()?;
+        let file_name: Box<[u8]> = row.take_opt(2).unwrap()?;
+        Ok(Some((group_id, encryption_method, file_name)))
     }
 
     pub fn reset(&self) -> DbResult<()> {
@@ -1251,13 +1352,13 @@ mod tests {
             let dm_messages1 = DB.get_dm_messages(0, dm_group1, 1).unwrap();
             assert_eq!(dm_messages1[0].id, 1);
             assert_eq!(dm_messages1[0].encryption_method, "!plaintext");
-            assert_eq!(dm_messages1[0].content, "Hello, World!".as_bytes().into());
+            assert_eq!(dm_messages1[0].content, Some("Hello, World!".as_bytes().into()));
             assert_eq!(dm_messages1[0].reply_to, None);
             assert_eq!(dm_messages1[0].edit_for, None);
             assert_eq!(dm_messages1[0].status, MessageStatus::Delivered);
             assert_eq!(dm_messages1[1].id, 2);
             assert_eq!(dm_messages1[1].encryption_method, "privatecipher123");
-            assert_eq!(dm_messages1[1].content, [0x69, 0x68].into());
+            assert_eq!(dm_messages1[1].content, Some([0x69, 0x68].into()));
             assert_eq!(dm_messages1[1].reply_to, None);
             assert_eq!(dm_messages1[1].edit_for, None);
             assert_eq!(dm_messages1[1].status, MessageStatus::SentByOther);

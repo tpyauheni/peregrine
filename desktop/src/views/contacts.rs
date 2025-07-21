@@ -4,11 +4,12 @@ use chrono::Local;
 use client::{cache::CACHE, future_retry_loop, packet_sender::PacketState, storage::STORAGE};
 use dioxus::{logger::tracing::error, prelude::*};
 use dioxus_markdown::Markdown;
+use rfd::AsyncFileDialog;
 use server::{
     AccountCredentials, DmGroup, DmMessage, FoundAccount, GroupMessage, MessageStatus,
     MultiUserGroup,
 };
-use shared::crypto;
+use shared::crypto::{self, CryptoAlgorithms};
 
 use crate::Route;
 
@@ -279,7 +280,7 @@ fn DmMessagesPanel(selected_dm_group: DmGroup, credentials: AccountCredentials) 
     let messages = if let Some(messages) = cached_messages() {
         rsx! {
             for message in messages {
-                DmMessageComponent { contact_id, message }
+                DmMessageComponent { contact_id, message, credentials }
             }
         }
     } else {
@@ -288,7 +289,7 @@ fn DmMessagesPanel(selected_dm_group: DmGroup, credentials: AccountCredentials) 
                 messages.reverse();
                 rsx! {
                     for message in messages {
-                        DmMessageComponent { contact_id, message }
+                        DmMessageComponent { contact_id, message, credentials }
                     }
                 }
             }
@@ -382,6 +383,7 @@ fn DmMessagesPanel(selected_dm_group: DmGroup, credentials: AccountCredentials) 
                     };
                     _ = msg_input.set_focus(true).await;
                 },
+                display: "flex",
 
                 textarea {
                     id: "main-msg-input",
@@ -438,6 +440,36 @@ fn DmMessagesPanel(selected_dm_group: DmGroup, credentials: AccountCredentials) 
                         document::eval(r#"let input = document.getElementById("main-msg-input");
                             input.style = "height: 36px";"#).await.unwrap();
                     }
+                }
+
+                button {
+                    width: "29px",
+                    height: "29px",
+                    onclick: move |_| async move {
+                        let Some(file) = AsyncFileDialog::new()
+                            .pick_file()
+                            .await else {
+                                return;
+                        };
+                        let (encrypted_file_name, encrypted_content, encryption_method): (Box<[u8]>, Box<[u8]>, String) = if let Some((algorithm_name, key)) = STORAGE.load_dm_key(selected_dm_group.id) {
+                            (
+                                crypto::symmetric_encrypt(&algorithm_name, file.file_name().as_bytes(), &key).unwrap(),
+                                crypto::symmetric_encrypt(&algorithm_name, &file.read().await, &key).unwrap(),
+                                algorithm_name.encryption_method(),
+                            )
+                        } else {
+                            (Box::from(file.file_name().as_bytes()), file.read().await.into_boxed_slice(), "plain".to_owned())
+                        };
+                        println!("Send file result: {:?}", server::send_dm_file(
+                            selected_dm_group.id,
+                            encryption_method,
+                            encrypted_file_name,
+                            encrypted_content,
+                            credentials,
+                        ).await);
+                        dm_messages_resource.restart();
+                    },
+                    "F"
                 }
             }
         }
@@ -712,7 +744,7 @@ pub fn DmGroupPanel(
 
 #[component]
 #[allow(non_snake_case)]
-fn DmMessageComponent(contact_id: u64, message: DmMessage) -> Element {
+fn DmMessageComponent(contact_id: u64, message: DmMessage, credentials: AccountCredentials) -> Element {
     const ICON_MSG_STATUS_SENT: Asset = asset!(
         "/assets/msg_status_sent_icon.png",
         ImageAssetOptions::new()
@@ -733,21 +765,63 @@ fn DmMessageComponent(contact_id: u64, message: DmMessage) -> Element {
     );
     let message_content = if message.encryption_method != "plain" {
         if let Some(key) = STORAGE.load_dm_key(contact_id) {
-            match crypto::symmetric_decrypt(&key.0, &message.content, &key.1) {
-                Some(Some(plaintext)) => {
-                    let plain_string = String::from_utf8_lossy(&plaintext);
-                    rsx!(Markdown { src: plain_string })
-                },
-                status => {
-                    println!("Decryption failed: {status:?}");
-                    rsx!(p { style: "color:#faa", "Failed to decrypt message" })
+            if let Some(file_name) = message.file_name {
+                match crypto::symmetric_decrypt(&key.0, &file_name, &key.1) {
+                    Some(Some(file_name)) => {
+                        let file_name = String::from_utf8_lossy(&file_name);
+                        rsx!(button {
+                            onclick: move |_| {
+                                let key = key.clone();
+                                async move {
+                                    let file_data = match server::get_dm_file(message.id, credentials).await {
+                                        Ok(data) => data,
+                                        Err(err) => {
+                                            println!("Failed to get file from server: {err}");
+                                            return;
+                                        },
+                                    };
+                                    // TODO: Use `file_data.encryption_method` instead of `key.0`.
+                                    match crypto::symmetric_decrypt(&key.0, &file_data.content, &key.1) {
+                                        Some(Some(content)) => {
+                                            let Some(file) = AsyncFileDialog::new()
+                                                .save_file()
+                                                .await
+                                            else {
+                                                return;
+                                            };
+                                            file.write(&content).await.unwrap();
+                                        }
+                                        status => {
+                                            println!("File content decryption failed: {status:?}");
+                                        }
+                                    }
+                                }
+                            },
+                            {file_name}
+                        })
+                    },
+                    status => {
+                        println!("Decryption failed: {status:?}");
+                        rsx!(p { style: "color:#faa", "Failed to decrypt message" })
+                    }
+                }
+            } else {
+                match crypto::symmetric_decrypt(&key.0, &message.content.unwrap(), &key.1) {
+                    Some(Some(plaintext)) => {
+                        let plain_string = String::from_utf8_lossy(&plaintext);
+                        rsx!(Markdown { src: plain_string })
+                    },
+                    status => {
+                        println!("Decryption failed: {status:?}");
+                        rsx!(p { style: "color:#faa", "Failed to decrypt message" })
+                    }
                 }
             }
         } else {
             rsx!(p { style: "color:#faa", "Failed to decrypt message" })
         }
     } else {
-        let plain_string = String::from_utf8_lossy(&message.content);
+        let plain_string = String::from_utf8_lossy(message.content.as_ref().unwrap());
         rsx!(Markdown { src: plain_string })
     };
     let sent_by_me = message.status != MessageStatus::SentByOther;
@@ -766,6 +840,7 @@ fn DmMessageComponent(contact_id: u64, message: DmMessage) -> Element {
             })},
 
             {message_content}
+
             div {
                 class: "msg-info",
 
@@ -916,7 +991,7 @@ fn GroupMessageComponent(
     let message_content = if message.encryption_method != "plain" {
         if let Some(key) = STORAGE.load_group_key(group_id) {
             if let Some(Some(plaintext)) =
-                crypto::symmetric_decrypt(&key.0, &message.content, &key.1)
+                crypto::symmetric_decrypt(&key.0, &message.content.unwrap(), &key.1)
             {
                 rsx!(Markdown { src: String::from_utf8_lossy(&plaintext) })
             } else {
@@ -926,7 +1001,7 @@ fn GroupMessageComponent(
             rsx!(p { style: "color:#f00", "Failed to decrypt message" })
         }
     } else {
-        rsx!(Markdown { src: String::from_utf8_lossy(&message.content) })
+        rsx!(Markdown { src: String::from_utf8_lossy(message.content.as_ref().unwrap()) })
     };
     rsx! {
         {author}

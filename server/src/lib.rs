@@ -17,7 +17,7 @@ use shared::crypto::PublicKey;
 use shared::limits::LIMITS;
 #[cfg(feature = "server")]
 use shared::types::GroupPermissions;
-use shared::{crypto::{x3dh::X3DhReceiverKeysPublic, CryptoAlgorithms}, types::UserIcon};
+use shared::{crypto::{x3dh::X3DhReceiverKeysPublic, CryptoAlgorithms}, types::{File, UserIcon}};
 
 #[cfg(feature = "server")]
 use crate::secret::db::DB;
@@ -45,6 +45,7 @@ pub enum ServerError {
     GroupPartiallyJoined,
     InvalidGroupId,
     ActionOnSelfIsForbidden,
+    FileNotFound,
 }
 
 impl FromStr for ServerError {
@@ -68,6 +69,7 @@ impl FromStr for ServerError {
             "GroupPartiallyJoined" => Ok(Self::GroupPartiallyJoined),
             "InvalidGroupId" => Ok(Self::InvalidGroupId),
             "ActionOnSelfIsForbidden" => Ok(Self::ActionOnSelfIsForbidden),
+            "FileNotFound" => Ok(Self::FileNotFound),
             _ => {
                 let Some(s_split) = s.split_once(':') else {
                     return Err(());
@@ -107,6 +109,7 @@ impl Display for ServerError {
             Self::GroupPartiallyJoined => "GroupPartiallyJoined".to_owned(),
             Self::InvalidGroupId => "InvalidGroupId".to_owned(),
             Self::ActionOnSelfIsForbidden => "ActionOnSelfIsForbidden".to_owned(),
+            Self::FileNotFound => "FileNotFound".to_owned(),
         })?;
         Ok(())
     }
@@ -152,22 +155,24 @@ pub enum MessageStatus {
 pub struct DmMessage {
     pub id: u64,
     pub encryption_method: String,
-    pub content: Box<[u8]>,
+    pub content: Option<Box<[u8]>>,
     pub reply_to: Option<u64>,
     pub edit_for: Option<u64>,
     pub sent_time: Option<NaiveDateTime>,
     pub status: MessageStatus,
+    pub file_name: Option<Box<[u8]>>,
 }
 
 #[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
 pub struct GroupMessage {
     pub id: u64,
     pub encryption_method: String,
-    pub content: Box<[u8]>,
+    pub content: Option<Box<[u8]>>,
     pub reply_to: Option<u64>,
     pub edit_for: Option<u64>,
     pub sent_time: Option<NaiveDateTime>,
     pub sender_id: u64,
+    pub file_name: Option<Box<[u8]>>,
 }
 
 #[derive(Debug, Default, Clone, Copy, PartialEq, Eq, Serialize, Deserialize)]
@@ -1385,6 +1390,158 @@ pub async fn leave_group(
         Ok(()) => Ok(()),
         Err(err) => {
             error!("Failed to leave from a group: {err:?}");
+            Err(ServerFnError::WrappedServerError(
+                ServerError::InternalDatabaseError,
+            ))
+        }
+    }
+}
+
+#[server(endpoint = "send_dm_file")]
+pub async fn send_dm_file(
+    group_id: u64,
+    encryption_method: String,
+    encrypted_file_name: Box<[u8]>,
+    content: Box<[u8]>,
+    credentials: AccountCredentials,
+) -> Result<u64, ServerFnError<ServerError>> {
+    check_session(credentials)?;
+    check_is_in_dm_group(credentials.id, group_id)?;
+
+    if encryption_method.len() > LIMITS.max_encryption_method_length {
+        return Err(ServerFnError::WrappedServerError(
+            ServerError::InvalidArgumentSize,
+        ));
+    }
+
+    if encrypted_file_name.len() > LIMITS.max_file_name_length {
+        return Err(ServerFnError::WrappedServerError(
+            ServerError::InvalidArgumentSize,
+        ));
+    }
+
+    if content.len() > LIMITS.max_message_length {
+        return Err(ServerFnError::WrappedServerError(
+            ServerError::InvalidArgumentSize,
+        ));
+    }
+
+    let message_id = match DB.send_dm_file(credentials.id, group_id, &encryption_method, &encrypted_file_name, None) {
+        Ok(id) => Ok(id),
+        Err(err) => {
+            error!("Failed to send DM file: {err:?}");
+            Err(ServerFnError::WrappedServerError(
+                ServerError::InternalDatabaseError,
+            ))
+        }
+    }?;
+    STORAGE.store_dm_file(message_id, &content);
+    Ok(message_id)
+}
+
+#[server(endpoint = "send_group_file")]
+pub async fn send_group_file(
+    group_id: u64,
+    encryption_method: String,
+    encrypted_file_name: Box<[u8]>,
+    content: Box<[u8]>,
+    credentials: AccountCredentials,
+) -> Result<u64, ServerFnError<ServerError>> {
+    check_session(credentials)?;
+    check_is_in_group(credentials.id, group_id)?;
+
+    if encryption_method.len() > LIMITS.max_encryption_method_length {
+        return Err(ServerFnError::WrappedServerError(
+            ServerError::InvalidArgumentSize,
+        ));
+    }
+
+    if encrypted_file_name.len() > LIMITS.max_file_name_length {
+        return Err(ServerFnError::WrappedServerError(
+            ServerError::InvalidArgumentSize,
+        ));
+    }
+
+    if content.len() > LIMITS.max_message_length {
+        return Err(ServerFnError::WrappedServerError(
+            ServerError::InvalidArgumentSize,
+        ));
+    }
+
+    let message_id = match DB.send_group_file(credentials.id, group_id, &encryption_method, &encrypted_file_name, None) {
+        Ok(id) => Ok(id),
+        Err(err) => {
+            error!("Failed to send DM file: {err:?}");
+            Err(ServerFnError::WrappedServerError(
+                ServerError::InternalDatabaseError,
+            ))
+        }
+    }?;
+    STORAGE.store_group_file(message_id, &content);
+    Ok(message_id)
+}
+
+#[server(endpoint = "get_dm_file")]
+pub async fn get_dm_file(
+    message_id: u64,
+    credentials: AccountCredentials,
+) -> Result<File, ServerFnError<ServerError>> {
+    check_session(credentials)?;
+    match DB.get_dm_file_data(message_id) {
+        Ok(Some((group_id, encryption_method, file_name))) => {
+            check_is_in_dm_group(credentials.id, group_id)?;
+            let Some(content) = STORAGE.load_dm_file(message_id) else {
+                return Err(ServerFnError::WrappedServerError(
+                    ServerError::FileNotFound,
+                ));
+            };
+            Ok(File {
+                name: file_name,
+                content,
+                encryption_method,
+            })
+        }
+        Ok(None) => {
+            Err(ServerFnError::WrappedServerError(
+                ServerError::FileNotFound,
+            ))
+        }
+        Err(err) => {
+            error!("Failed to get DM file: {err:?}");
+            Err(ServerFnError::WrappedServerError(
+                ServerError::InternalDatabaseError,
+            ))
+        }
+    }
+}
+
+#[server(endpoint = "get_group_file")]
+pub async fn get_group_file(
+    message_id: u64,
+    credentials: AccountCredentials,
+) -> Result<File, ServerFnError<ServerError>> {
+    check_session(credentials)?;
+    match DB.get_group_file_data(message_id) {
+        Ok(Some((group_id, encryption_method, file_name))) => {
+            check_is_in_group(credentials.id, group_id)?;
+            let Some(content) = STORAGE.load_group_file(message_id) else {
+                return Err(ServerFnError::WrappedServerError(
+                    ServerError::FileNotFound,
+                ));
+            };
+            Ok(File {
+                name: file_name,
+                content,
+                encryption_method,
+            })
+        }
+        Ok(None) => {
+            Err(ServerFnError::WrappedServerError(
+                ServerError::FileNotFound,
+            ))
+        }
+        Err(err) => {
+            error!("Failed to get group file: {err:?}");
             Err(ServerFnError::WrappedServerError(
                 ServerError::InternalDatabaseError,
             ))

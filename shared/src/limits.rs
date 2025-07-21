@@ -11,6 +11,7 @@ pub struct Limits {
     pub max_message_length: usize,
     pub max_user_icon_size: usize,
     pub max_group_icon_size: usize,
+    pub max_file_name_length: usize,
 }
 
 pub static LIMITS: Limits = Limits {
@@ -25,4 +26,5 @@ pub static LIMITS: Limits = Limits {
     max_message_length: 16 * 1024,
     max_user_icon_size: 4 * 1024 * 1024,
     max_group_icon_size: 4 * 1024 * 1024,
+    max_file_name_length: 256,
 };

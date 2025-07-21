@@ -15,6 +15,7 @@ tokio = { version = "1.45", features = ["time"] }
 dioxus-free-icons = { version = "0.9", features = ["octicons"] }
 postcard = { workspace = true }
 dioxus-markdown = "0.0"
+rfd = "0.15"
 
 [features]
 default = []

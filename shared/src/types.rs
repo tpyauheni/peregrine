@@ -1,3 +1,5 @@
+use serde::{Deserialize, Serialize};
+
 // TODO: Really check for permissions.
 pub struct GroupPermissions {
     pub send_messages: bool,
@@ -79,3 +81,10 @@ impl GroupPermissions {
 }
 
 pub type UserIcon = Option<Box<[u8]>>;
+
+#[derive(Debug, Clone, PartialEq, Eq, Serialize, Deserialize)]
+pub struct File {
+    pub name: Box<[u8]>,
+    pub content: Box<[u8]>,
+    pub encryption_method: String,
+}
