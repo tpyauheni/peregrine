@@ -29,7 +29,7 @@ use crate::secret::storage::STORAGE;
 #[cfg(feature = "server")]
 use shared::storage::{GeneralStorage, RawStorage};
 
-#[derive(Debug, PartialEq, Clone, Copy)]
+#[derive(Debug, PartialEq, Clone, Copy, Serialize, Deserialize)]
 pub enum ServerError {
     InternalDatabaseError,
     InvalidSessionToken,

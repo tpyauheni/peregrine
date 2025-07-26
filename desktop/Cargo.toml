@@ -12,12 +12,12 @@ server = { workspace = true }
 shared = { workspace = true }
 chrono = { workspace = true }
 tokio = { version = "1.45", features = ["time"] }
-dioxus-free-icons = { version = "0.9", features = ["octicons"] }
+dioxus-free-icons = { version = "0.10.0-alpha.1", features = ["octicons"] }
 postcard = { workspace = true }
 dioxus-markdown = "0.0"
-rfd = "0.15"
+rfd = { version = "0.15", optional = true }
 
 [features]
 default = []
-desktop = ["dioxus/desktop"]
+desktop = ["dioxus/desktop", "dep:rfd"]
 server = ["dioxus/server", "server/server"]

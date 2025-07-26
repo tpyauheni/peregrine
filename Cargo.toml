@@ -10,7 +10,8 @@ members = [
 ]
 
 [workspace.dependencies]
-dioxus = { version = "0.6", default-features = false }
+# We NEED https://github.com/DioxusLabs/dioxus/pull/4376 for Android support which was merged after the latest stable release
+dioxus = { version = "0.7.0-alpha.3" }
 serde = "1.0"
 base64 = "0.22"
 chrono = "0.4"

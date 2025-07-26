@@ -4,12 +4,12 @@ version = "0.1.0"
 edition = "2024"
 
 [dependencies]
-dioxus = { workspace = true, features = ["router", "web"] }
+dioxus = { workspace = true, features = ["router", "web"], optional = true }
 ui = { workspace = true }
 client = { workspace = true }
 server = { workspace = true }
 
 [features]
 default = []
-web = ["dioxus/web"]
-server = ["dioxus/server", "server/server"]
+web = ["dep:dioxus", "dioxus/web"]
+server = ["dep:dioxus", "dioxus/server", "server/server"]

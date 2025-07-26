@@ -1,7 +1,10 @@
-use dioxus::prelude::*;
+use dioxus::{logger::tracing::Level, prelude::*};
 
-use ui::Navbar;
-use views::{Blog, Home};
+use ::server::*;
+use views::{
+    Contacts, CreateGroup, GroupMenu, Home, Invites, LoginAccount, OtherUserAccount,
+    RegisterAccount, SessionValidityChecker,
+};
 
 mod views;
 
@@ -11,44 +14,76 @@ enum Route {
     #[layout(MobileNavbar)]
     #[route("/")]
     Home {},
-    #[route("/blog/:id")]
-    Blog { id: i32 },
+    #[route("/contacts/:credentials")]
+    Contacts { credentials: AccountCredentials },
+    #[end_layout]
+    #[nest("/account")]
+        #[route("/")]
+        RegisterAccount {},
+        #[route("/signup")]
+        LoginAccount {},
+    #[end_nest]
+    #[route("/check_session/:credentials")]
+    SessionValidityChecker { credentials: AccountCredentials },
+    #[route("/invites/:credentials")]
+    Invites { credentials: AccountCredentials },
+    #[route("/user?:user_id&:credentials")]
+    OtherUserAccount { user_id: u64, credentials: AccountCredentials },
+    #[route("/create_group/:credentials")]
+    CreateGroup { credentials: AccountCredentials },
+    #[route("/group?:group_id&:credentials")]
+    GroupMenu { group_id: u64, credentials: AccountCredentials },
 }
 
 const MAIN_CSS: Asset = asset!("/assets/main.css");
 
 fn main() {
+    #[cfg(debug_assertions)]
+    {
+        dioxus::logger::init(Level::DEBUG).unwrap();
+    }
+    #[cfg(not(debug_assertions))]
+    {
+        dioxus::logger::init(Level::INFO).unwrap();
+    }
+    // I'm no really sure the following block is useful for mobile:
+    #[cfg(all(not(feature = "mobile"), feature = "server"))]
+    {
+        init_server();
+    }
+
+    #[cfg(all(feature = "mobile", not(debug_assertions)))]
+    {
+        use dioxus::desktop::Config;
+        use dioxus::desktop::WindowBuilder;
+
+        dioxus::LaunchBuilder::new()
+            .with_cfg(
+                Config::default().with_menu(None).with_window(
+                    WindowBuilder::new()
+                        .with_fullscreen(true)
+                        .with_title("Peregrine"),
+                ),
+            )
+            .launch(App);
+    }
+    #[cfg(not(all(feature = "mobile", not(debug_assertions))))]
     dioxus::launch(App);
 }
 
 #[component]
 fn App() -> Element {
-    // Build cool things ✌️
-
+    #[cfg(feature = "server")]
+    init_server();
     rsx! {
-        // Global app resources
         document::Link { rel: "stylesheet", href: MAIN_CSS }
-
         Router::<Route> {}
     }
 }
 
-/// A mobile-specific Router around the shared `Navbar` component
-/// which allows us to use the mobile-specific `Route` enum.
 #[component]
 fn MobileNavbar() -> Element {
     rsx! {
-        Navbar {
-            Link {
-                to: Route::Home {},
-                "Home"
-            }
-            Link {
-                to: Route::Blog { id: 1 },
-                "Blog"
-            }
-        }
-
         Outlet::<Route> {}
     }
 }

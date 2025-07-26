@@ -8,6 +8,12 @@ dioxus = { workspace = true, features = ["router"] }
 ui = { workspace = true }
 client = { workspace = true }
 server = { workspace = true }
+shared = { workspace = true }
+chrono = { workspace = true }
+tokio = { version = "1.45", features = ["time"] }
+dioxus-free-icons = { version = "0.10.0-alpha.1", features = ["octicons"] }
+postcard = { workspace = true }
+dioxus-markdown = "0.0"
 
 [features]
 default = []
