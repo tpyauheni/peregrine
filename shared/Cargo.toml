@@ -15,12 +15,7 @@ ed25519-dalek = { version = "2", optional = true }
 k256 = { version = "0.13", optional = true, features = ["ecdh", "ecdsa"] }
 pbkdf2 = { version = "0.12", optional = true }
 sha3 = { version = "0.10", optional = true }
-
-[dependencies.bee2-rs]
-git = "https://github.com/tpyauheni/bee2-rs.git"
-version = "0.2.1"
-features = ["belt-ctr", "belt-hmac", "belt-pbkdf2", "bign", "bash-full", "belt-dwp"]
-optional = true
+bee2-rs = { version = "0.2", optional = true, features = ["belt-ctr", "belt-hmac", "belt-pbkdf2", "bign", "bash-full", "belt-dwp"] }
 
 [features]
 default = ["bee2-rs", "aes-gcm", "chacha20poly1305", "curve25519-dalek", "k256", "pbkdf2"]
