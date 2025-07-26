@@ -1105,6 +1105,42 @@ pub async fn send_group_message(
         ));
     }
 
+    let permissions = match DB.get_group_member_permissions(group_id, credentials.id) {
+        Ok(Some(permissions)) => {
+            permissions
+        }
+        Ok(None) => {
+            return Err(ServerFnError::WrappedServerError(ServerError::Forbidden));
+        }
+        Err(err) => {
+            error!("Failed to get group member permissions before sending message: {err:?}");
+            return Err(ServerFnError::WrappedServerError(
+                ServerError::InternalDatabaseError,
+            ));
+        }
+    };
+
+    let group = match DB.get_group_by_id(group_id) {
+        Ok(Some(group)) => {
+            group
+        }
+        Ok(None) => {
+            return Err(ServerFnError::WrappedServerError(ServerError::Forbidden));
+        }
+        Err(err) => {
+            error!("Failed to get group before sending message: {err:?}");
+            return Err(ServerFnError::WrappedServerError(
+                ServerError::InternalDatabaseError,
+            ));
+        }
+    };
+
+    // TODO: Don't check for admin rights but instead just don't include `send_messages` when
+    // inviting into a channel (by default).
+    if (group.channel && !permissions.is_admin()) || (!group.channel && !permissions.send_messages) {
+        return Err(ServerFnError::WrappedServerError(ServerError::Forbidden));
+    }
+
     match DB.send_group_message(credentials.id, group_id, &encryption_method, &message, None) {
         Ok(id) => Ok(id),
         Err(err) => {
