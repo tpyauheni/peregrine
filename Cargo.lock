@@ -4141,7 +4141,6 @@ dependencies = [
  "client",
  "dioxus 0.7.0-alpha.3",
  "dioxus-free-icons",
- "dioxus-markdown",
  "postcard",
  "server",
  "shared",

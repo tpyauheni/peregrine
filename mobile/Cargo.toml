@@ -13,7 +13,6 @@ chrono = { workspace = true }
 tokio = { version = "1.45", features = ["time"] }
 dioxus-free-icons = { version = "0.10.0-alpha.1", features = ["octicons"] }
 postcard = { workspace = true }
-dioxus-markdown = "0.0"
 
 [features]
 default = []
