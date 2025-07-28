@@ -6,3 +6,44 @@ rustflags = [
     "-C", "link-arg=-landroid",
     "-C", "link-arg=-llog",
 ]
+<<<<<<< Updated upstream
+=======
+
+[target.x86_64-pc-windows-gnu]
+# linker = "clang"
+linker = "/usr/bin/x86_64-w64-mingw32-gcc"
+# rustflags = [
+#     "-C",
+#     "link-args=-target x86_64-pc-windows-gnu -fuse-ld=lld",
+# ]
+
+[target.x86_64-linux-android]
+linker = "x86_64-linux-android33-clang"
+rustflags = [
+    "-C", "link-arg=-Wl,--eh-frame-hdr",
+    "-C", "link-arg=-L${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/x86_64-linux-android/33",
+    "-C", "link-arg=-landroid",
+    "-C", "link-arg=-llog",
+    # Updated flags below
+    "-C", "link-arg=-Wl,--no-undefined",
+    "-C", "link-arg=-l:libunwind.a",  # Helps with static linking
+    "-C", "link-arg=-ldl",
+]
+# [target.x86_64-linux-android]
+# linker = "x86_64-linux-android30-clang"
+# rustflags = [
+#     "-C", "link-arg=-Wl,--eh-frame-hdr",
+#     "-C", "link-arg=-L${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/x86_64-linux-android/21",
+#     "-C", "link-arg=-landroid",
+#     "-C", "link-arg=-llog",
+#     "-C", "target-feature=+crt-static",  # CRITICAL: Avoid glibc dependency
+# ]
+# [target.x86_64-linux-android]
+# linker = "x86_64-linux-android30-clang"
+# rustflags = [
+#     "-C", "link-arg=-Wl,--eh-frame-hdr",
+#     "-C", "link-arg=-L${ANDROID_NDK_HOME}/toolchains/llvm/prebuilt/linux-x86_64/sysroot/usr/lib/x86_64-linux-android/21",
+#     "-C", "link-arg=-landroid",
+#     "-C", "link-arg=-llog",
+# ]
+>>>>>>> Stashed changes

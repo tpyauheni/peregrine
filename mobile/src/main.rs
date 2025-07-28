@@ -52,6 +52,7 @@ fn main() {
         init_server();
     }
 
+<<<<<<< Updated upstream
     #[cfg(all(feature = "mobile", not(debug_assertions)))]
     {
         use dioxus::desktop::Config;
@@ -68,6 +69,8 @@ fn main() {
             .launch(App);
     }
     #[cfg(not(all(feature = "mobile", not(debug_assertions))))]
+=======
+>>>>>>> Stashed changes
     dioxus::launch(App);
 }
 

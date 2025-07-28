@@ -4139,8 +4139,14 @@ version = "0.1.0"
 dependencies = [
  "chrono",
  "client",
+<<<<<<< Updated upstream
  "dioxus 0.7.0-alpha.3",
  "dioxus-free-icons",
+=======
+ "dioxus",
+ "dioxus-free-icons",
+ "dioxus-markdown",
+>>>>>>> Stashed changes
  "postcard",
  "server",
  "shared",

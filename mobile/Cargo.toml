@@ -11,8 +11,14 @@ server = { workspace = true }
 shared = { workspace = true }
 chrono = { workspace = true }
 tokio = { version = "1.45", features = ["time"] }
+<<<<<<< Updated upstream
 dioxus-free-icons = { version = "0.10.0-alpha.1", features = ["octicons"] }
 postcard = { workspace = true }
+=======
+dioxus-free-icons = { version = "0.9", features = ["octicons"] }
+postcard = { workspace = true }
+dioxus-markdown = "0.0"
+>>>>>>> Stashed changes
 
 [features]
 default = []
