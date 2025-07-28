@@ -21,6 +21,7 @@ pub fn Contacts(credentials: AccountCredentials) -> Element {
     let joined_groups = future_retry_loop!(server::get_joined_groups(credentials));
     let selected_dm_group: Signal<Option<DmGroup>> = use_signal(|| None);
     let selected_group: Signal<Option<MultiUserGroup>> = use_signal(|| None);
+    let force_refresh_messages: Signal<bool> = use_signal(|| false);
     let item_list = if let Some(users) = found_users() {
         if users.is_empty() {
             rsx!(h3 {
@@ -46,10 +47,10 @@ pub fn Contacts(credentials: AccountCredentials) -> Element {
                     } else {
                         rsx! {
                             for group in dm_groups {
-                                DmGroupPanel { key: (group.id + u64::MAX / 2), group, user_id: credentials.id, selected_dm_group, selected_group, credentials }
+                                DmGroupPanel { key: (group.id + u64::MAX / 2), group, user_id: credentials.id, selected_dm_group, selected_group, force_refresh_messages, credentials }
                             }
                             for group in groups {
-                                GroupPanel { key: group.id, group: group.clone(), user_id: credentials.id, selected_dm_group, selected_group, credentials }
+                                GroupPanel { key: group.id, group: group.clone(), user_id: credentials.id, selected_dm_group, selected_group, force_refresh_messages, credentials }
                             }
                         }
                     }
@@ -158,9 +159,9 @@ pub fn Contacts(credentials: AccountCredentials) -> Element {
             div {
                 class: "twopanel twopanel-right",
                 if let Some(dm_group) = selected_dm_group() {
-                    DmMessagesPanel { selected_dm_group: dm_group, credentials }
+                    DmMessagesPanel { selected_dm_group: dm_group, force_refresh_messages, credentials }
                 } else if let Some(group) = selected_group() {
-                    GroupMessagesPanel { selected_group: group, credentials }
+                    GroupMessagesPanel { selected_group: group, force_refresh_messages, credentials }
                 } else {
                     h2 {
                         margin: "20px",
@@ -230,7 +231,7 @@ pub fn User(account: FoundAccount, credentials: AccountCredentials) -> Element {
 
 #[component]
 #[allow(non_snake_case)]
-fn DmMessagesPanel(selected_dm_group: DmGroup, credentials: AccountCredentials) -> Element {
+fn DmMessagesPanel(selected_dm_group: DmGroup, force_refresh_messages: Signal<bool>, credentials: AccountCredentials) -> Element {
     let mut msg_input: Signal<Option<Rc<MountedData>>> = use_signal(|| None);
     let mut message: Signal<String> = use_signal(String::new);
     let sending_message: Signal<PacketState<u64>> = use_signal(|| PacketState::NotStarted);
@@ -268,6 +269,14 @@ fn DmMessagesPanel(selected_dm_group: DmGroup, credentials: AccountCredentials) 
             messages.reverse();
             cached_messages.set(Some(messages.clone()));
         }
+    });
+    use_effect(move || {
+        if force_refresh_messages() {
+            dm_messages_resource.restart();
+        }
+    });
+    use_effect(move || {
+        force_refresh_messages.set(false);
     });
     use_future(move || async move {
         loop {
@@ -478,7 +487,7 @@ fn DmMessagesPanel(selected_dm_group: DmGroup, credentials: AccountCredentials) 
 
 #[component]
 #[allow(non_snake_case)]
-fn GroupMessagesPanel(selected_group: MultiUserGroup, credentials: AccountCredentials) -> Element {
+fn GroupMessagesPanel(selected_group: MultiUserGroup, force_refresh_messages: Signal<bool>, credentials: AccountCredentials) -> Element {
     let mut msg_input: Signal<Option<Rc<MountedData>>> = use_signal(|| None);
     let mut message: Signal<String> = use_signal(String::new);
     let sending_message: Signal<PacketState<u64>> = use_signal(|| PacketState::NotStarted);
@@ -490,6 +499,14 @@ fn GroupMessagesPanel(selected_group: MultiUserGroup, credentials: AccountCreden
             messages.reverse();
             cached_messages.set(Some(messages));
         }
+    });
+    use_effect(move || {
+        if force_refresh_messages() {
+            group_messages_resource.restart();
+        }
+    });
+    use_effect(move || {
+        force_refresh_messages.set(false);
     });
     use_future(move || async move {
         loop {
@@ -666,6 +683,7 @@ pub fn DmGroupPanel(
     user_id: u64,
     selected_dm_group: Signal<Option<DmGroup>>,
     selected_group: Signal<Option<MultiUserGroup>>,
+    force_refresh_messages: Signal<bool>,
     credentials: AccountCredentials,
 ) -> Element {
     const ICON_TRANSPARENT: Asset = asset!(
@@ -709,6 +727,7 @@ pub fn DmGroupPanel(
             onclick: move |_| async move {
                 selected_dm_group.set(Some(group));
                 selected_group.set(None);
+                force_refresh_messages.set(true);
             },
 
             div {
@@ -885,6 +904,7 @@ pub fn GroupPanel(
     user_id: u64,
     selected_dm_group: Signal<Option<DmGroup>>,
     selected_group: Signal<Option<MultiUserGroup>>,
+    force_refresh_messages: Signal<bool>,
     credentials: AccountCredentials,
 ) -> Element {
     const ICON_TRANSPARENT: Asset = asset!(
@@ -918,6 +938,7 @@ pub fn GroupPanel(
                 async move {
                     selected_group.set(Some(group_clone));
                     selected_dm_group.set(None);
+                    force_refresh_messages.set(true);
                 }
             },
 
