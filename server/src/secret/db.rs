@@ -47,7 +47,9 @@ impl Database {
                 `account_id` BIGINT NOT NULL,
                 `session_token` BLOB NOT NULL,
                 `begin_time` DATETIME NOT NULL,
-                `end_time` DATETIME NOT NULL
+                `end_time` DATETIME NOT NULL,
+                INDEX `session_token_idx` (`session_token`(32)),
+                INDEX `account_id_idx` (`account_id`)
             );
         ",
         )?;
@@ -79,7 +81,9 @@ impl Database {
             CREATE TABLE IF NOT EXISTS `group_members` (
                 `group_id` BIGINT NOT NULL,
                 `user_id` BIGINT NOT NULL,
-                `permissions` BLOB NOT NULL
+                `permissions` BLOB NOT NULL,
+                INDEX `user_groups_idx` (`user_id`, `group_id`),
+                INDEX `group_users_idx` (`group_id`, `user_id`)
             );
         ",
         )?;
@@ -112,7 +116,8 @@ impl Database {
                 `edited_message_id` BIGINT,
                 `content` BLOB,
                 `send_time` DATETIME NOT NULL,
-                `file_name` BLOB({})
+                `file_name` BLOB({}),
+                INDEX `group_time_idx` (`group_id`, `send_time`)
             );
         ",
             LIMITS.max_encryption_method_length, LIMITS.max_file_name_length,
@@ -146,21 +151,6 @@ impl Database {
                 `permissions` VARCHAR(255) NOT NULL,
                 `encryption_data` BLOB
             );
-        ",
-        )?;
-        conn.query_drop(
-            r"
-            ALTER TABLE `sessions`
-                ADD INDEX `session_token_idx` (`session_token`(32));
-            ALTER TABLE `sessions`
-                ADD INDEX `account_id_idx` (`account_id`);
-
-            ALTER TABLE `group_members`
-                ADD INDEX `user_groups_idx` (`user_id`, `group_id`),
-                ADD INDEX `group_users_idx` (`group_id`, `user_id`);
-
-            ALTER TABLE `group_messages`
-                ADD INDEX `group_time_idx` (`group_id`, `send_time`);
         ",
         )?;
         Ok(())

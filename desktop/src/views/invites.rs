@@ -334,12 +334,19 @@ fn get_shared_key(
         return None;
     };
     let encryption_data = encryption_data?;
+    println!("Get shared key: found encryption data");
     let x3dh_data: X3DhData = from_bytes(&encryption_data).ok()?;
+    println!("Get shared key: found valid X3DH data");
     // TODO: Get `crypto_alg` from `encryption_data`.
     let crypto_alg = crypto::preferred_alogirthm();
     let (private_keys, public_keys) = STORAGE.x3dh_data(&crypto_alg);
-    let shared_key =
-        x3dh::decode_x3dh(x3dh_data, user.cryptoidentity.ik, public_keys, private_keys).ok()?;
+    let shared_key = match x3dh::decode_x3dh(x3dh_data, user.cryptoidentity.ik, public_keys, private_keys) {
+        Ok(key) => key,
+        Err(err) => {
+            eprintln!("Failed to decode X3DH data (shared key): {err:?}");
+            return None;
+        }
+    };
     if for_dm {
         STORAGE.store_dm_key(id, (crypto_alg, &shared_key));
     } else {
@@ -536,7 +543,7 @@ fn ReceivedInvite(invite: Invite, credentials: AccountCredentials) -> Element {
                     {email}
                 }
             }
-            if matches!(user_data(), PacketState::Response(_)) && *accept_result.read() == PacketState::NotStarted && *reject_result.read() == PacketState::NotStarted {
+            if matches!(user_data(), PacketState::Response(Some(_))) && *accept_result.read() == PacketState::NotStarted {
                 button {
                     font_size: "16px",
                     padding: "8px 12px",
@@ -560,6 +567,8 @@ fn ReceivedInvite(invite: Invite, credentials: AccountCredentials) -> Element {
                     },
                     "Accept"
                 }
+            }
+            if matches!(user_data(), PacketState::Response(_)) && *reject_result.read() == PacketState::NotStarted {
                 button {
                     font_size: "16px",
                     padding: "8px 12px",

@@ -51,19 +51,19 @@ impl FromStr for CryptoAlgorithms {
 impl Display for CryptoAlgorithms {
     fn fmt(&self, f: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
         let mut result = String::new();
-        result += &self.hash;
+        result += &self.hash.replace("::", "__");
         result.push('.');
-        result += &self.kdf;
+        result += &self.kdf.replace("::", "__");
         result.push('.');
-        result += &self.diffie_hellman;
+        result += &self.diffie_hellman.replace("::", "__");
         result.push('.');
-        result += &self.signature;
+        result += &self.signature.replace("::", "__");
         result.push('.');
-        result += &self.symmetric_encryption;
+        result += &self.symmetric_encryption.replace("::", "__");
         result.push('.');
-        result += &self.aead;
+        result += &self.aead.replace("::", "__");
         result.push('.');
-        result += &self.rng;
+        result += &self.rng.replace("::", "__");
         f.write_str(&result)
     }
 }

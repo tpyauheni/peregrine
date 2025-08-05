@@ -82,9 +82,9 @@ impl Storage {
             load_dm_key,
             remove_dm_key,
         ],
-        format!("dm{other_user_id}.bin"),
+        format!("dm{other_contact_id}.bin"),
         (CryptoAlgorithms, Box<[u8]>),
-        [other_user_id: u64],
+        [other_contact_id: u64],
     );
     storage_file!(
         pub [
@@ -110,8 +110,8 @@ impl Storage {
         }
     }
 
-    pub fn store_dm_key(&self, other_user_id: u64, data: (CryptoAlgorithms, &[u8])) -> bool {
-        self.store_dm_key_box(other_user_id, (data.0, Box::from(data.1)))
+    pub fn store_dm_key(&self, other_contact_id: u64, data: (CryptoAlgorithms, &[u8])) -> bool {
+        self.store_dm_key_box(other_contact_id, (data.0, Box::from(data.1)))
     }
 
     pub fn store_group_key(&self, group_id: u64, data: (CryptoAlgorithms, &[u8])) -> bool {

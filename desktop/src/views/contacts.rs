@@ -272,6 +272,7 @@ fn DmMessagesPanel(selected_dm_group: DmGroup, force_refresh_messages: Signal<bo
     });
     use_effect(move || {
         if force_refresh_messages() {
+            cached_messages.set(None);
             dm_messages_resource.restart();
         }
     });
@@ -422,12 +423,13 @@ fn DmMessagesPanel(selected_dm_group: DmGroup, force_refresh_messages: Signal<bo
                         }
                         event.prevent_default();
                         let content = message();
-                        let (msg_bytes, encryption_method): (Box<[u8]>, String) = if let Some((algorithm_name, key)) = STORAGE.load_dm_key(selected_dm_group.id) {
+                        let (msg_bytes, encryption_method): (Box<[u8]>, String) = if let Some((algorithm_name, key)) = STORAGE.load_dm_key(contact_id) {
                             (
                                 crypto::symmetric_encrypt(&algorithm_name, content.as_bytes(), &key).unwrap(),
                                 algorithm_name.encryption_method(),
                             )
                         } else {
+                            eprintln!("Failed to load encryption data for DM group {selected_dm_group:?}");
                             (Box::from(content.clone().as_bytes()), "plain".to_owned())
                         };
                         println!("Send result: {:?}", server::send_dm_message(
@@ -460,7 +462,7 @@ fn DmMessagesPanel(selected_dm_group: DmGroup, force_refresh_messages: Signal<bo
                             .await else {
                                 return;
                         };
-                        let (encrypted_file_name, encrypted_content, encryption_method): (Box<[u8]>, Box<[u8]>, String) = if let Some((algorithm_name, key)) = STORAGE.load_dm_key(selected_dm_group.id) {
+                        let (encrypted_file_name, encrypted_content, encryption_method): (Box<[u8]>, Box<[u8]>, String) = if let Some((algorithm_name, key)) = STORAGE.load_dm_key(contact_id) {
                             (
                                 crypto::symmetric_encrypt(&algorithm_name, file.file_name().as_bytes(), &key).unwrap(),
                                 crypto::symmetric_encrypt(&algorithm_name, &file.read().await, &key).unwrap(),
@@ -502,6 +504,7 @@ fn GroupMessagesPanel(selected_group: MultiUserGroup, force_refresh_messages: Si
     });
     use_effect(move || {
         if force_refresh_messages() {
+            cached_messages.set(None);
             group_messages_resource.restart();
         }
     });
@@ -656,6 +659,7 @@ fn GroupMessagesPanel(selected_group: MultiUserGroup, force_refresh_messages: Si
                                 algorithm_name.encryption_method(),
                             )
                         } else {
+                            eprintln!("Failed to load encryption data for group {}", selected_group.id);
                             (Box::from(content.clone().as_bytes()), "plain".to_owned())
                         };
                         println!("Send result: {:?}", server::send_group_message(
@@ -843,6 +847,29 @@ fn DmMessageComponent(
         } else {
             rsx!(p { style: "color:#faa", "Failed to decrypt message" })
         }
+    } else if let Some(file_name) = message.file_name {
+        let file_name = String::from_utf8_lossy(&file_name);
+        rsx!(button {
+            onclick: move |_| {
+                async move {
+                    let file_data = match server::get_dm_file(message.id, credentials).await {
+                        Ok(data) => data,
+                        Err(err) => {
+                            println!("Failed to get file from server: {err}");
+                            return;
+                        },
+                    };
+                    let Some(file) = AsyncFileDialog::new()
+                            .save_file()
+                            .await
+                    else {
+                        return;
+                    };
+                    file.write(&file_data.content).await.unwrap();
+                }
+            },
+            {file_name}
+        })
     } else {
         let plain_string = String::from_utf8_lossy(message.content.as_ref().unwrap());
         rsx!(Markdown { src: plain_string })
